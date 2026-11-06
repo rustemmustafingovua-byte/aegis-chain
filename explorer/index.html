@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>AEGIS Explorer — живой узел v0.7</title>
+<style>
+body{font-family:system-ui;background:#0b0e1a;color:#e8eaf6;margin:0;padding:20px;max-width:960px;margin:0 auto}
+.card{background:#11162e;border:1px solid #1e2547;border-radius:14px;padding:16px;margin:14px 0}
+.mono{font-family:ui-monospace,Menlo,monospace;word-break:break-all;font-size:13px}
+.row{display:flex;gap:16px;flex-wrap:wrap;align-items:center}
+.badge{background:#1e2547;padding:4px 10px;border-radius:20px;font-size:12px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{border-bottom:1px solid #1e2547;padding:6px;text-align:left}
+h1{font-size:24px} .ok{color:#3dd68c} .warn{color:#ffb648} .bad{color:#ff6b6b}
+button{background:#7c6bff;color:white;border:0;border-radius:8px;padding:8px 14px;cursor:pointer}
+button.secondary{background:#1e2547}
+input,select{background:#0f132e;border:1px solid #2a3263;color:white;border-radius:8px;padding:8px;width:280px}
+.tabs{display:flex;gap:8px;margin:12px 0}
+.tabs button{background:#1e2547} .tabs button.active{background:#7c6bff}
+a{color:#7c6bff}
+#blockModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);padding:40px;overflow:auto}
+.modalbox{background:#11162e;max-width:900px;margin:0 auto;padding:20px;border-radius:14px;border:1px solid #1e2547}
+</style>
+</head>
+<body>
+<h1>🛡️ AEGIS Explorer <span class="badge" id="height">height …</span> <span class="badge">v0.7</span></h1>
+<div class="card">
+  <div class="row"><span>Mempool: <b id="mempool">…</b></span><span>Supply: <b id="supply">…</b></span><span>Root: <span class="mono" id="root">…</span></span><span>Head: <span class="mono" id="head">…</span></span></div>
+  <div style="margin-top:10px"><button onclick="refresh()">↻ refresh</button> <input id="addr" placeholder="aeg1... address"/> <button onclick="lookup()">balance</button> <span id="bal" class="mono"></span></div>
+  <div class="tabs">
+    <button id="tab-blocks" class="active" onclick="switchTab('blocks')">Блоки</button>
+    <button id="tab-swap" onclick="switchTab('swap')">Swap / AMM</button>
+    <button id="tab-stake" onclick="switchTab('stake')">Stake</button>
+    <button id="tab-gov" onclick="switchTab('gov')">Governance</button>
+  </div>
+</div>
+
+<div id="panel-blocks">
+  <div class="card">
+    <h3>Последние блоки</h3>
+    <table><thead><tr><th>H</th><th>Hash</th><th>TXs</th><th>Proposer</th><th>Time</th></tr></thead><tbody id="blocks"></tbody></table>
+  </div>
+  <div class="card">
+    <h3>Аккаунты (live)</h3>
+    <table><thead><tr><th>Address</th><th>Balance</th><th>Stake</th><th>Nonce</th><th>Humanity</th></tr></thead><tbody id="accounts"></tbody></table>
+  </div>
+</div>
+
+<div id="panel-swap" style="display:none">
+  <div class="card">
+    <h3>💱 Swap AEGIS ↔ USDC (AMM x·y=k, 0.30%)</h3>
+    <div class="row">
+      <span>Pool: <b id="poolInfo">…</b></span><span>Price: <b id="poolPrice">…</b></span>
+    </div>
+    <div style="margin-top:10px">
+      <input id="swapIn" placeholder="amount in (min units) e.g. 1000000" value="1000000"/>
+      <button onclick="quoteSwap()">quote</button>
+      <span id="swapOut" class="mono"></span>
+    </div>
+    <p style="font-size:13px;opacity:.8">Swap выполняется транзакцией <span class="mono">data=swap:AEGIS/USDC</span> из кошелька (wallet-mobile). Здесь — только котировка через <span class="mono">aeg_swapQuote</span>.</p>
+  </div>
+</div>
+
+<div id="panel-stake" style="display:none">
+  <div class="card">
+    <h3>🥩 Stake / Unstake (MIN 10k AEGIS)</h3>
+    <div class="row"><span>Total staked: <b id="totalStake">…</b></span><span>Validators: <b id="valCount">…</b></span></div>
+    <table><thead><tr><th>Validator (ed)</th><th>Stake</th><th>Address</th></tr></thead><tbody id="validators"></tbody></table>
+    <p style="font-size:13px;opacity:.8">Staking — через <span class="mono">data=stake:</span> транзакцию. Unstake создаёт pending с задержкой 100 блоков.</p>
+  </div>
+</div>
+
+<div id="panel-gov" style="display:none">
+  <div class="card">
+    <h3>🗳️ Governance (stake-weighted + humanity quorum ≥2)</h3>
+    <table><thead><tr><th>ID</th><th>Title</th><th>Action</th><th>For</th><th>Against</th><th>Humanity</th><th>Status</th></tr></thead><tbody id="proposals"></tbody></table>
+  </div>
+</div>
+
+<div class="card" style="font-size:13px">
+  <b>Mesh / Anti-AI:</b> каждый tx hybrid Ed25519+ML-DSA-65, intent-bound, nullifier против double-spend.
+  API: <span class="mono">/api/state</span> <span class="mono">/api/rpc</span> | P2P: <span class="mono">:3899</span> | Peers: <b id="peers">…</b>
+</div>
+
+<div id="blockModal"><div class="modalbox">
+  <h3>Block <span id="mHeight" class="mono"></span> <button onclick="closeModal()" style="float:right">×</button></h3>
+  <pre id="mBody" class="mono" style="white-space:pre-wrap"></pre>
+</div></div>
+
+<script>
+let state=null;
+function switchTab(t){
+  for(const id of ['blocks','swap','stake','gov']){
+    document.getElementById('panel-'+id).style.display = id===t?'':'none';
+    document.getElementById('tab-'+id).classList.toggle('active', id===t);
+  }
+}
+async function rpc(method, params=[]){
+  const r=await fetch('/api/rpc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});
+  return await r.json();
+}
+async function refresh(){
+  const r=await fetch('/api/state'); state=await r.json();
+  document.getElementById('height').textContent='height '+state.height;
+  document.getElementById('mempool').textContent=state.mempool;
+  document.getElementById('supply').textContent=state.supply;
+  document.getElementById('head').textContent=state.head? state.head.hash.slice(0,20)+'...' : '—';
+  document.getElementById('root').textContent=(state.stateRoot||'').slice(0,16)+'…';
+  document.getElementById('peers').textContent=(state.peers||[]).length+' peer(s)';
+  document.getElementById('blocks').innerHTML=state.blocks.map(b=>`<tr><td>${b.height}</td><td class="mono"><a href="#" onclick="showBlock(${b.height});return false">${b.hash}...</a></td><td>${b.txCount}</td><td class="mono">${b.proposer||''}</td><td>${new Date(b.timestamp).toLocaleTimeString()}</td></tr>`).join('');
+  document.getElementById('accounts').innerHTML=state.accounts.map(a=>`<tr><td class="mono">${a.addr.slice(0,22)}...</td><td>${a.balance}</td><td>${a.stake}</td><td>${a.nonce}</td><td>${a.humanityScore??'—'}</td></tr>`).join('');
+  // swap
+  const pool=state.pools&&state.pools[0];
+  document.getElementById('poolInfo').textContent=pool? `${pool.key} base=${pool.base} quote=${pool.quote}`:'no pool';
+  document.getElementById('poolPrice').textContent=pool? (pool.price||''):'';
+  // stake
+  let total=0n; for(const a of state.accounts) total+=BigInt(a.stake);
+  document.getElementById('totalStake').textContent=total.toString();
+  document.getElementById('valCount').textContent=(state.validators||[]).length;
+  document.getElementById('validators').innerHTML=(state.validators||[]).map(v=>`<tr><td class="mono">${v.edPublic}</td><td>${v.stake}</td><td class="mono">${v.address||''}</td></tr>`).join('');
+  // gov
+  document.getElementById('proposals').innerHTML=(state.proposals||[]).map(p=>`<tr><td class="mono">${p.id}</td><td>${p.title}</td><td class="mono">${p.action}</td><td>${p.votesFor}</td><td>${p.votesAgainst}</td><td>${p.humanityVotes}</td><td><span class="${p.status==='passed'?'ok':p.status==='failed'?'bad':'warn'}">${p.status}</span></td></tr>`).join('') || '<tr><td colspan="7">no proposals</td></tr>';
+}
+async function lookup(){
+  const addr=document.getElementById('addr').value.trim(); if(!addr) return;
+  const j=await rpc('aeg_getBalance',[addr]);
+  document.getElementById('bal').textContent='balance: '+(j.result??j.error?.message);
+}
+async function quoteSwap(){
+  const amt=document.getElementById('swapIn').value.trim(); if(!amt) return;
+  const j=await rpc('aeg_swapQuote',['AEGIS/USDC', amt]);
+  document.getElementById('swapOut').textContent=j.result? `out: ${j.result.amountOut}` : ('err: '+j.error?.message);
+}
+async function showBlock(h){
+  const j=await rpc('aeg_getBlock',[h]);
+  document.getElementById('mHeight').textContent='#'+h;
+  document.getElementById('mBody').textContent=JSON.stringify(j.result,null,2).slice(0,8000);
+  document.getElementById('blockModal').style.display='block';
+}
+function closeModal(){ document.getElementById('blockModal').style.display='none'; }
+refresh(); setInterval(refresh,4000);
+</script>
+</body>
+</html>

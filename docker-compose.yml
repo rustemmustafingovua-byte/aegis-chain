@@ -1,0 +1,14 @@
+services:
+  aegis-node:
+    build: .
+    ports:
+      - "8899:8899"
+      - "3899:3899"
+    command: ["npm", "run", "serve", "--", "--port=8899"]
+    restart: unless-stopped
+  wallet:
+    build:
+      context: wallet-mobile
+    ports:
+      - "5188:80"
+    restart: unless-stopped

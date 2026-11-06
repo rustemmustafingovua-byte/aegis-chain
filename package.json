@@ -1,0 +1,72 @@
+{
+  "name": "aegis-chain",
+  "version": "0.7.0",
+  "description": "AEGIS — post-quantum hybrid chain with anti-AI shield, offline mesh autonomy, P2P network, RPC, explorer, keeper and Passkey wallet",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "aegis": "./dist/cli/aegis.js"
+  },
+  "exports": {
+    ".": "./dist/core-ts/index.js",
+    "./crypto": "./dist/core-ts/crypto.js",
+    "./hybrid": "./dist/core-ts/hybrid.js",
+    "./ledger": "./dist/core-ts/ledger.js",
+    "./chain": "./dist/core-ts/chain.js",
+    "./rpc": "./dist/core-ts/rpc.js",
+    "./p2p": "./dist/core-ts/p2p.js",
+    "./mesh": "./dist/core-ts/mesh.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "cryptocurrency",
+    "blockchain",
+    "pos",
+    "post-quantum",
+    "ml-dsa",
+    "dilithium",
+    "mesh",
+    "dt",
+    "anti-ai",
+    "passkey",
+    "aegis"
+  ],
+  "scripts": {
+    "test": "tsx --test test-ts/*.test.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "demo": "tsx cli/aegis.ts demo",
+    "wallet:new": "tsx cli/aegis.ts wallet new",
+    "wallet:send": "tsx cli/aegis.ts wallet send",
+    "mesh:demo": "tsx cli/aegis.ts mesh",
+    "node": "tsx cli/aegis.ts node",
+    "serve": "tsx cli/aegis.ts serve",
+    "explorer": "tsx cli/aegis.ts serve --port=8899",
+    "keeper": "tsx keeper/keeper.ts",
+    "contracts": "forge test"
+  },
+  "files": [
+    "dist",
+    "core-ts",
+    "cli",
+    "keeper",
+    "contracts",
+    "docs",
+    "explorer",
+    "wallet-mobile/dist",
+    "scripts",
+    "README.md",
+    "LICENSE",
+    "ARCHITECTURE.md"
+  ],
+  "dependencies": {
+    "@noble/post-quantum": "0.7.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

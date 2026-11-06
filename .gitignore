@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.pytest_cache/
+__pycache__/
+*.log
+.DS_Store
+.env
+.env.*
+out/
+cache/
+broadcast/
+lib/
+wallet-mobile/node_modules/
+wallet-mobile/dist/
+deployments/*.json
