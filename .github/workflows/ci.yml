@@ -24,5 +24,6 @@ jobs:
       - name: Forge contracts
         run: |
           curl -L https://foundry.paradigm.xyz | bash
-          ~/.foundry/bin/foundryup
-          cd contracts && ~/.foundry/bin/forge test -vv
+          export PATH="$HOME/.foundry/bin:$HOME/.config/.foundry/bin:$PATH"
+          foundryup
+          cd contracts && forge test -vv
