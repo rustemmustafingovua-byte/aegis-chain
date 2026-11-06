@@ -1,4 +1,4 @@
-# AEGIS Infra — полная инфраструктура (v0.7)
+# AEGIS Infra — полная инфраструктура (v0.8)
 
 ## Карта
 
@@ -13,11 +13,11 @@
 │  chain (PoS 2/3) + ledger + mempool         │
 │  /api/rpc  /api/state  /health              │
 │  explorer/index.html (статика)              │
-│  P2P TCP :3899 (gossip blocks/txs)          │
+│  P2P TCP :3899 + libp2p Noise (v0.8) gossip blocks/txs          │
 └──────────────────┬──────────────────────────┘
                    │ Base / mesh
 ┌──────────────────▼──────────────────────────┐
-│ keeper/keeper.ts — автономный конвертер      │
+│ keeper/keeper.ts + keeper/bridge-watcher.ts — автономный конвертер      │
 │  USDC/ETH → AEGIS via AMM (x*y=k, 0.3%)     │
 │  пишет блоки сам, без биржи                 │
 └─────────────────────────────────────────────┘
@@ -47,7 +47,7 @@ POST /api/rpc  {"jsonrpc":"2.0","id":1,"method":"aeg_getState","params":[]}
   aeg_sendTx(tx) | aeg_meshStatus | aeg_sync
 
 GET  /api/state  -> { height, head, supply, accounts[], blocks[] }
-GET  /health     -> { ok:true, height, version:"0.7.0" }
+GET  /health     -> { ok:true, height, version:"0.8.0" }
 ```
 
 ## P2P

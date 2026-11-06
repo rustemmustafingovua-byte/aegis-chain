@@ -21,3 +21,8 @@ jobs:
         run: |
           pip install pytest -q
           python3 -m pytest test_aegis.py -v
+      - name: Forge contracts
+        run: |
+          curl -L https://foundry.paradigm.xyz | bash
+          ~/.foundry/bin/foundryup
+          cd contracts && ~/.foundry/bin/forge test -vv

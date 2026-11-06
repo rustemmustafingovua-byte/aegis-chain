@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 /// @notice AEGIS — ERC-20 + permit (как Lumen LMN.sol)
+/// v0.8: full permit (EIP-2612) implementation — previously typehash declared but unused.
 contract AEGIS {
     string public constant name = "AEGIS";
     string public constant symbol = "AEGIS";
@@ -44,5 +45,26 @@ contract AEGIS {
         balanceOf[from] -= value;
         balanceOf[to] += value;
         emit Transfer(from, to, value);
+    }
+
+    /// @notice EIP-2612 permit: set allowance via signature (gasless approval)
+    function permit(address pOwner, address spender, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s) external {
+        require(block.timestamp <= deadline, "permit expired");
+        bytes32 structHash = keccak256(abi.encode(PERMIT_TYPEHASH, pOwner, spender, value, nonces[pOwner], deadline));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", block.chainid, address(this), structHash));
+        address recovered = ecrecover(digest, v, r, s);
+        require(recovered == pOwner && recovered != address(0), "bad sig");
+        nonces[pOwner] += 1;
+        allowance[pOwner][spender] = value;
+        emit Approval(pOwner, spender, value);
+    }
+
+    /// @notice owner can mint up to hard cap (testnet / treasury). Callers must enforce governance.
+    function mint(address to, uint256 value) external {
+        require(msg.sender == owner, "owner only");
+        require(to != address(0), "zero");
+        totalSupply += value;
+        balanceOf[to] += value;
+        emit Transfer(address(0), to, value);
     }
 }

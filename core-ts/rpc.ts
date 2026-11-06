@@ -1,5 +1,5 @@
 /**
- * AEGIS RPC v0.7 — JSON-RPC 2.0 поверх HTTP (как Lumen)
+ * AEGIS RPC v0.8 — JSON-RPC 2.0 поверх HTTP (как Lumen)
  * Методы: aeg_getState, aeg_getBlock, aeg_getBalance, aeg_sendTx, aeg_meshStatus, aeg_sync
  * v0.7: aeg_sendTx validates (canApply) before mempool, + pool/stake/gov/bridge methods
  */
@@ -22,7 +22,7 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
     res.setHeader("Access-Control-Allow-Headers", "content-type");
     if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
 
-    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "0.7.0" })); }
+    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "0.8.0" })); }
     if (req.url === "/api/state") {
       res.writeHead(200, { "Content-Type": "application/json" });
       const pools = [...chain.ledger.pools.entries()].map(([key, p]) => ({
