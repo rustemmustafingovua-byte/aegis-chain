@@ -22,7 +22,7 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
     res.setHeader("Access-Control-Allow-Headers", "content-type");
     if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
 
-    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "0.9.0" })); }
+    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.0.0" })); }
     if (req.url === "/api/state") {
       res.writeHead(200, { "Content-Type": "application/json" });
       const pools = [...chain.ledger.pools.entries()].map(([key, p]) => ({
@@ -54,10 +54,14 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
       return res.end(JSON.stringify({ error: "not found" }));
     }
     let body = "";
-    req.on("data", (c) => (body += c));
+    let bytes = 0;
+    req.on("data", (c) => { bytes += c.length; if (bytes > 1_048_576) { res.writeHead(413, { "Content-Type": "application/json" }); res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "body too large" } })); req.destroy(); return; } body += c; });
     req.on("end", () => {
+      if (bytes > 1_048_576) return;
       try {
         const reqJson = JSON.parse(body) as RpcRequest;
+        if (!reqJson.method || typeof reqJson.method !== "string") throw new Error("bad method");
+        if (!Array.isArray(reqJson.params)) throw new Error("bad params");
         const result = dispatch(reqJson.method, reqJson.params || []);
         const resp: RpcResponse = { jsonrpc: "2.0", id: reqJson.id, result };
         res.writeHead(200, { "Content-Type": "application/json" });

@@ -57,7 +57,14 @@ export function hybridSign(keys: HybridKeypair, msg: Buffer | string): HybridSig
 
 export function hybridVerify(edPublicB64: string, mlPublicKey: Uint8Array, msg: Buffer | string, sig: HybridSignature): boolean {
   const data = typeof msg === "string" ? Buffer.from(msg) : msg;
-  if (!edVerify(edPublicB64, data, sig.edSig)) return false;
+  // PQ size guards: reject truncated/oversized blobs before spending CPU (DoS guard)
+  if (!(mlPublicKey instanceof Uint8Array) || mlPublicKey.length !== 1952) return false;
+  try {
+    if (Buffer.from(sig.edSig, "base64").length !== 64) return false;
+    if (Buffer.from(sig.mlSig, "base64").length !== 3309) return false;
+    if (typeof sig.hybrid !== "string" || sig.hybrid.length !== 64) return false;
+  } catch { return false; }
+  try { if (!edVerify(edPublicB64, data, sig.edSig)) return false; } catch { return false; }
   try {
     const mlSigBytes = Buffer.from(sig.mlSig, "base64");
     const ok = ml_dsa65.verify(mlSigBytes, new Uint8Array(data), mlPublicKey);

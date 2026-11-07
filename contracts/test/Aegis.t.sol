@@ -67,9 +67,22 @@ contract AegisTest {
     function test_amm_swap_moves_tokens() public {
         uint256 beforeB = mock.balanceOf(address(this));
         aegis.approve(address(amm), 1_000_000);
-        uint256 out = amm.swap(1_000_000);
+        uint256 out = amm.swap(1_000_000, 1, block.timestamp + 100);
         assert(out > 0);
         assert(mock.balanceOf(address(this)) == beforeB + out);
+    }
+
+    function test_amm_swap_slippage_reverts() public {
+        aegis.approve(address(amm), 1_000_000);
+        bool bad;
+        try amm.swap(1_000_000, type(uint256).max, block.timestamp + 100) {} catch { bad = true; }
+        assert(bad);
+    }
+
+    function test_aegis_mint_cap() public {
+        bool bad;
+        try aegis.mint(address(0x1), 2_000_000_000_000_000) {} catch { bad = true; }
+        assert(bad); // would exceed 2e9 cap
     }
 
     function test_bridge_fund_claim_refund() public {
@@ -94,7 +107,7 @@ contract AegisTest {
         bytes32 id = keccak256("lock2");
         bytes32 hash = keccak256(abi.encodePacked("x"));
         mock.approve(address(vault), 500);
-        vault.fund(id, address(0x1), 500, hash, 1);
+        vault.fund(id, address(0x1), 500, hash, 60);
         // refund before timelock must revert
         bool early;
         try vault.refund(id) {} catch { early = true; }

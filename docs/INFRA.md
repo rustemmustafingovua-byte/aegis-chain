@@ -1,4 +1,4 @@
-# AEGIS Infra — полная инфраструктура (v0.9)
+# AEGIS Infra — полная инфраструктура (v1.0)
 
 ## Карта
 
@@ -13,7 +13,7 @@
 │  chain (PoS 2/3) + ledger + mempool         │
 │  /api/rpc  /api/state  /health              │
 │  explorer/index.html (статика)              │
-│  P2P TCP :3899 + libp2p Noise :4899 (v0.9) gossip blocks/txs          │
+│  P2P TCP :3899 + libp2p Noise :4899 (v1.0) gossip blocks/txs          │
 └──────────────────┬──────────────────────────┘
                    │ Base / mesh
 ┌──────────────────▼──────────────────────────┐

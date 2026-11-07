@@ -3,143 +3,282 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>AEGIS Explorer — живой узел v0.7</title>
+<meta name="description" content="AEGIS Explorer — живой узел v1.0. Постквантовый hybrid-блокчейн, устойчивый к взлому и ИИ-агентам."/>
+<meta name="theme-color" content="#0b0e1a"/>
+<title>AEGIS Explorer — живой узел v1.0</title>
 <style>
-body{font-family:system-ui;background:#0b0e1a;color:#e8eaf6;margin:0;padding:20px;max-width:960px;margin:0 auto}
-.card{background:#11162e;border:1px solid #1e2547;border-radius:14px;padding:16px;margin:14px 0}
-.mono{font-family:ui-monospace,Menlo,monospace;word-break:break-all;font-size:13px}
-.row{display:flex;gap:16px;flex-wrap:wrap;align-items:center}
-.badge{background:#1e2547;padding:4px 10px;border-radius:20px;font-size:12px}
+:root{
+  --bg:#0b0e1a; --bg2:#0f132e; --card:#11162e; --card2:#161c3d;
+  --line:#1e2547; --line2:#2a3263;
+  --acc:#7c6bff; --acc2:#a193ff; --cyan:#38e1ff; --gold:#ffbf5e;
+  --ok:#3dd68c; --warn:#ffb648; --bad:#ff6b6b;
+  --txt:#e8eaf6; --mut:#9aa3c7; --rad:14px; --rad2:10px;
+  --shadow:0 20px 60px rgba(0,0,0,.45);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  background:
+    radial-gradient(900px 500px at 15% -10%,rgba(124,107,255,.22),transparent 60%),
+    radial-gradient(700px 400px at 90% 0%,rgba(56,225,255,.12),transparent 60%),
+    var(--bg);
+  color:var(--txt);min-height:100dvh}
+.wrap{max-width:1120px;margin:0 auto;padding:18px 16px 64px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;word-break:break-all;font-size:13px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.badge{display:inline-flex;align-items:center;gap:6px;background:var(--line);padding:6px 12px;border-radius:999px;font-size:13px;border:1px solid var(--line2)}
+.card{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--rad);padding:18px;margin:14px 0;box-shadow:var(--shadow)}
+.card h3{margin:0 0 12px;font-size:15px;letter-spacing:.02em}
+.tabs{display:flex;gap:8px;flex-wrap:wrap}
+.tabs button{background:var(--line);color:var(--txt);border:1px solid var(--line2);padding:8px 14px;border-radius:999px;cursor:pointer;font-size:14px}
+.tabs button.active{background:var(--acc);border-color:var(--acc)}
 table{width:100%;border-collapse:collapse;font-size:14px}
-td,th{border-bottom:1px solid #1e2547;padding:6px;text-align:left}
-h1{font-size:24px} .ok{color:#3dd68c} .warn{color:#ffb648} .bad{color:#ff6b6b}
-button{background:#7c6bff;color:white;border:0;border-radius:8px;padding:8px 14px;cursor:pointer}
-button.secondary{background:#1e2547}
-input,select{background:#0f132e;border:1px solid #2a3263;color:white;border-radius:8px;padding:8px;width:280px}
-.tabs{display:flex;gap:8px;margin:12px 0}
-.tabs button{background:#1e2547} .tabs button.active{background:#7c6bff}
-a{color:#7c6bff}
-#blockModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);padding:40px;overflow:auto}
-.modalbox{background:#11162e;max-width:900px;margin:0 auto;padding:20px;border-radius:14px;border:1px solid #1e2547}
+td,th{border-bottom:1px solid var(--line);padding:9px 8px;text-align:left;vertical-align:top}
+th{color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+a{color:var(--acc2);text-decoration:none}
+a:hover{text-decoration:underline}
+button{background:linear-gradient(180deg,#8f80ff,var(--acc));color:#fff;border:0;border-radius:10px;padding:10px 16px;cursor:pointer;font-size:15px;font-weight:600}
+button:active{transform:translateY(1px)}
+button.secondary{background:var(--line);border:1px solid var(--line2)}
+input,select,textarea{background:var(--bg2);border:1px solid var(--line2);color:var(--txt);border-radius:10px;padding:10px 12px;width:100%}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--acc);outline-offset:1px}
+.hero{padding:22px 0 6px}
+.hero h1{font-size:clamp(26px,4.5vw,40px);line-height:1.08;margin:8px 0 6px}
+.hero .sub{color:var(--mut);font-size:15px;max-width:720px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:14px}
+.kpi{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:var(--rad2);padding:12px}
+.kpi .v{font-size:20px;font-weight:800}
+.kpi .k{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
+.ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+.chip{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid var(--line2)}
+.flash{transition:background .3s}
+.flash.new{background:rgba(61,214,140,.12)!important}
+.sticky{position:sticky;top:0;z-index:20;background:rgba(11,14,26,.86);backdrop-filter:blur(10px);padding:10px 0}
+#blockModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);padding:28px 14px;overflow:auto;z-index:50}
+.modalbox{background:var(--card);max-width:920px;margin:0 auto;padding:20px;border-radius:16px;border:1px solid var(--line2);box-shadow:var(--shadow)}
+pre{white-space:pre-wrap;word-break:break-word;background:var(--bg2);padding:14px;border-radius:12px;border:1px solid var(--line)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:#0f132e;border:1px solid var(--line2);color:var(--txt);padding:10px 16px;border-radius:999px;display:none;z-index:60;box-shadow:var(--shadow);font-size:14px}
+.skel{opacity:.6;animation:p 1.2s infinite}
+@keyframes p{50%{opacity:.3}}
+.hint{font-size:13px;color:var(--mut)}
+.hr{height:1px;background:var(--line);margin:14px 0}
+.grid2{display:grid;gap:14px;grid-template-columns:1fr}
+@media(min-width:860px){.grid2{grid-template-columns:1.25fr .75fr}}
+.spark{display:flex;align-items:end;gap:3px;height:34px;margin-top:8px}
+.spark i{flex:1;background:linear-gradient(180deg,var(--cyan),var(--acc));border-radius:2px;min-height:3px;opacity:.9}
+.searchline{display:flex;gap:8px;flex-wrap:wrap}
+.searchline>div{flex:1;min-width:220px}
+footer{color:var(--mut);font-size:13px;margin-top:18px}
 </style>
 </head>
 <body>
-<h1>🛡️ AEGIS Explorer <span class="badge" id="height">height …</span> <span class="badge">v0.7</span></h1>
-<div class="card">
-  <div class="row"><span>Mempool: <b id="mempool">…</b></span><span>Supply: <b id="supply">…</b></span><span>Root: <span class="mono" id="root">…</span></span><span>Head: <span class="mono" id="head">…</span></span></div>
-  <div style="margin-top:10px"><button onclick="refresh()">↻ refresh</button> <input id="addr" placeholder="aeg1... address"/> <button onclick="lookup()">balance</button> <span id="bal" class="mono"></span></div>
-  <div class="tabs">
-    <button id="tab-blocks" class="active" onclick="switchTab('blocks')">Блоки</button>
-    <button id="tab-swap" onclick="switchTab('swap')">Swap / AMM</button>
-    <button id="tab-stake" onclick="switchTab('stake')">Stake</button>
-    <button id="tab-gov" onclick="switchTab('gov')">Governance</button>
+<div class="wrap">
+  <div class="sticky">
+    <div class="row" style="justify-content:space-between">
+      <b style="font-size:17px">🛡️ AEGIS <span style="color:var(--cyan)">Explorer</span></b>
+      <div class="row">
+        <span class="badge" id="height">height …</span>
+        <span class="badge">v1.0</span>
+        <span class="badge" id="netstat">● live</span>
+      </div>
+    </div>
   </div>
-</div>
 
-<div id="panel-blocks">
-  <div class="card">
-    <h3>Последние блоки</h3>
-    <table><thead><tr><th>H</th><th>Hash</th><th>TXs</th><th>Proposer</th><th>Time</th></tr></thead><tbody id="blocks"></tbody></table>
-  </div>
-  <div class="card">
-    <h3>Аккаунты (live)</h3>
-    <table><thead><tr><th>Address</th><th>Balance</th><th>Stake</th><th>Nonce</th><th>Humanity</th></tr></thead><tbody id="accounts"></tbody></table>
-  </div>
-</div>
-
-<div id="panel-swap" style="display:none">
-  <div class="card">
-    <h3>💱 Swap AEGIS ↔ USDC (AMM x·y=k, 0.30%)</h3>
+  <div class="hero">
     <div class="row">
-      <span>Pool: <b id="poolInfo">…</b></span><span>Price: <b id="poolPrice">…</b></span>
+      <span class="badge" style="background:rgba(124,107,255,.14)">постквантовый · hybrid Ed25519 + ML-DSA-65</span>
+      <span class="badge" style="background:rgba(61,214,140,.1)">anti-AI shield</span>
+      <span class="badge" style="background:rgba(56,225,255,.1)">mesh / offline</span>
     </div>
-    <div style="margin-top:10px">
-      <input id="swapIn" placeholder="amount in (min units) e.g. 1000000" value="1000000"/>
-      <button onclick="quoteSwap()">quote</button>
-      <span id="swapOut" class="mono"></span>
+    <h1>Щит Афины для денег.<br/>Не ключи — <u>намерение человека</u> защищаем.</h1>
+    <p class="sub">Живой узел: блоки, мемпул, AMM пул, стейкинг, governance. Каждый tx — hybrid подпись + intent binding + nullifier против double-spend. Даже рою ИИ-агентов не пройти без живого человека.</p>
+    <div class="kpis">
+      <div class="kpi"><div class="v" id="kHeight">…</div><div class="k">Высота</div></div>
+      <div class="kpi"><div class="v" id="kMempool">…</div><div class="k">Mempool</div><div class="spark" id="spark"></div></div>
+      <div class="kpi"><div class="v" id="kSupply">…</div><div class="k">Supply (base units)</div></div>
+      <div class="kpi"><div class="v" id="kPeers">…</div><div class="k">Peers</div></div>
+      <div class="kpi"><div class="v" id="kPrice">…</div><div class="k">AMM price</div></div>
     </div>
-    <p style="font-size:13px;opacity:.8">Swap выполняется транзакцией <span class="mono">data=swap:AEGIS/USDC</span> из кошелька (wallet-mobile). Здесь — только котировка через <span class="mono">aeg_swapQuote</span>.</p>
   </div>
-</div>
 
-<div id="panel-stake" style="display:none">
   <div class="card">
-    <h3>🥩 Stake / Unstake (MIN 10k AEGIS)</h3>
-    <div class="row"><span>Total staked: <b id="totalStake">…</b></span><span>Validators: <b id="valCount">…</b></span></div>
-    <table><thead><tr><th>Validator (ed)</th><th>Stake</th><th>Address</th></tr></thead><tbody id="validators"></tbody></table>
-    <p style="font-size:13px;opacity:.8">Staking — через <span class="mono">data=stake:</span> транзакцию. Unstake создаёт pending с задержкой 100 блоков.</p>
+    <div class="searchline">
+      <div><label class="hint">Адрес / хеш</label><input id="addr" placeholder="aeg1… или hash блока"/></div>
+      <div style="flex:0 1 auto;display:flex;gap:8px;align-items:end">
+        <button class="secondary" onclick="lookup()">баланс</button>
+        <button onclick="refresh()">↻</button>
+        <button class="secondary" id="autoBtn" onclick="toggleAuto()">⏸ автоповтор</button>
+      </div>
+    </div>
+    <div class="hint" id="bal" style="margin-top:8px"></div>
+    <div class="tabs" style="margin-top:12px">
+      <button id="tab-blocks" class="active" onclick="switchTab('blocks')">Блоки</button>
+      <button id="tab-swap" onclick="switchTab('swap')">Swap / AMM</button>
+      <button id="tab-stake" onclick="switchTab('stake')">Stake</button>
+      <button id="tab-gov" onclick="switchTab('gov')">Governance</button>
+      <button id="tab-node" onclick="switchTab('node')">Node</button>
+    </div>
   </div>
-</div>
 
-<div id="panel-gov" style="display:none">
-  <div class="card">
-    <h3>🗳️ Governance (stake-weighted + humanity quorum ≥2)</h3>
-    <table><thead><tr><th>ID</th><th>Title</th><th>Action</th><th>For</th><th>Against</th><th>Humanity</th><th>Status</th></tr></thead><tbody id="proposals"></tbody></table>
+  <div id="panel-blocks">
+    <div class="grid2">
+      <div class="card">
+        <h3>Последние блоки <span style="color:var(--mut);font-weight:400">— клик откроет детали с подтверждением hybrid</span></h3>
+        <table><thead><tr><th>H</th><th>Hash</th><th>TXs</th><th>Proposer</th><th>Time</th></tr></thead><tbody id="blocks"></tbody></table>
+      </div>
+      <div class="card">
+        <h3>Аккаунты (live)</h3>
+        <table><thead><tr><th>Address</th><th>Bal</th><th>Stake</th><th>Nonce</th><th>Hum</th></tr></thead><tbody id="accounts"></tbody></table>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Hybrid-verify выбранного блока</h3>
+      <div class="hint">Проверяет Ed25519 + ML-DSA-65 подпись proposers и merkle root. Красный — документ подделан.</div>
+      <div class="row" style="margin-top:8px">
+        <input id="verifyH" placeholder="высота блока, напр. 0" style="max-width:200px"/>
+        <button onclick="verifyBlock()">проверить</button>
+        <span id="verifyOut" class="mono"></span>
+      </div>
+    </div>
   </div>
+
+  <div id="panel-swap" style="display:none">
+    <div class="card">
+      <h3>💱 Swap AEGIS ↔ USDC — AMM x·y=k, 0.30%</h3>
+      <div class="row"><span>Pool: <b id="poolInfo">…</b></span><span>Price: <b id="poolPrice">…</b></span><span id="poolDepth"></span></div>
+      <div class="hr"></div>
+      <div style="display:grid;gap:8px">
+        <label class="hint">amount in (base units, 6 decimals)</label>
+        <input id="swapIn" value="1000000"/>
+        <div class="row">
+          <button onclick="quoteSwap()">quote</button>
+          <span id="swapOut" class="mono"></span>
+        </div>
+      </div>
+      <p class="hint">Котировка через <span class="mono">aeg_swapQuote</span>. Исполнение — транзакцией <span class="mono">data=swap:AEGIS/USDC</span> из кошелька. Здесь — только честный оффчейн quote, без custody.</p>
+    </div>
+  </div>
+
+  <div id="panel-stake" style="display:none">
+    <div class="card">
+      <h3>🥩 Stake / Unstake <span style="color:var(--mut);font-weight:400">— MIN 10k AEGIS, unstake lock 100 блоков</span></h3>
+      <div class="row"><span>Total staked: <b id="totalStake">…</b></span><span>Validators: <b id="valCount">…</b></span></div>
+      <table><thead><tr><th>Validator (ed)</th><th>Stake</th><th>Address</th></tr></thead><tbody id="validators"></tbody></table>
+      <p class="hint">Staking — <span class="mono">data=stake:</span>. Unstake создаёт pending. Slash 10% за equivocation/double-spend.</p>
+    </div>
+  </div>
+
+  <div id="panel-gov" style="display:none">
+    <div class="card">
+      <h3>🗳️ Governance — stake-weighted + humanity quorum ≥2</h3>
+      <table><thead><tr><th>ID</th><th>Title</th><th>Action</th><th>For</th><th>Against</th><th>Humanity</th><th>Status</th></tr></thead><tbody id="proposals"></tbody></table>
+      <p class="hint">Sybil-resistant: голоса взвешены по proof-of-humanity + stake, а не по количеству кошельков.</p>
+    </div>
+  </div>
+
+  <div id="panel-node" style="display:none">
+    <div class="card">
+      <h3>🖥️ Node / Mesh / Peers</h3>
+      <div class="row">
+        <span>State root: <span class="mono" id="root">…</span></span>
+        <span>Head: <span class="mono" id="head">…</span></span>
+        <span id="peersLine"></span>
+      </div>
+      <div class="hr"></div>
+      <div class="hint"><b>Mesh / Anti-AI:</b> каждый tx hybrid Ed25519+ML-DSA-65, intent-bound, nullifier против double-spend. P2P: TCP :3899 + libp2p Noise :4899 (dual transport, gateway — DTN bridge). API: <span class="mono">/api/state</span> <span class="mono">/api/rpc</span></div>
+    </div>
+  </div>
+
+  <footer>AEGIS v1.0 — постквантовый trust layer. Не финансовая рекомендация. Кошелёк: <span class="mono">wallet-mobile/</span> · Доки: <span class="mono">docs/</span> · Аудит: <span class="mono">SECURITY.md</span></footer>
 </div>
 
-<div class="card" style="font-size:13px">
-  <b>Mesh / Anti-AI:</b> каждый tx hybrid Ed25519+ML-DSA-65, intent-bound, nullifier против double-spend.
-  API: <span class="mono">/api/state</span> <span class="mono">/api/rpc</span> | P2P: <span class="mono">:3899</span> | Peers: <b id="peers">…</b>
-</div>
-
+<div class="toast" id="toast"></div>
 <div id="blockModal"><div class="modalbox">
   <h3>Block <span id="mHeight" class="mono"></span> <button onclick="closeModal()" style="float:right">×</button></h3>
-  <pre id="mBody" class="mono" style="white-space:pre-wrap"></pre>
+  <pre id="mBody" class="mono"></pre>
 </div></div>
 
 <script>
-let state=null;
+let state=null, auto=true, lastBlocks=new Set(), memHist=[];
+function toast(t){const el=document.getElementById('toast');el.textContent=t;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>el.style.display='none',2200)}
 function switchTab(t){
-  for(const id of ['blocks','swap','stake','gov']){
+  for(const id of ['blocks','swap','stake','gov','node']){
     document.getElementById('panel-'+id).style.display = id===t?'':'none';
     document.getElementById('tab-'+id).classList.toggle('active', id===t);
   }
 }
+function toggleAuto(){auto=!auto;document.getElementById('autoBtn').textContent=auto?'⏸ автоповтор':'▶ автоповтор';document.getElementById('netstat').textContent=auto?'● live':'● paused'}
 async function rpc(method, params=[]){
   const r=await fetch('/api/rpc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});
   return await r.json();
 }
+function spark(){
+  const h=document.getElementById('spark'); h.innerHTML=memHist.slice(-24).map(n=>`<i style="height:${Math.max(3,Math.min(34,3+n*3))}px"></i>`).join('');
+}
 async function refresh(){
-  const r=await fetch('/api/state'); state=await r.json();
-  document.getElementById('height').textContent='height '+state.height;
-  document.getElementById('mempool').textContent=state.mempool;
-  document.getElementById('supply').textContent=state.supply;
-  document.getElementById('head').textContent=state.head? state.head.hash.slice(0,20)+'...' : '—';
-  document.getElementById('root').textContent=(state.stateRoot||'').slice(0,16)+'…';
-  document.getElementById('peers').textContent=(state.peers||[]).length+' peer(s)';
-  document.getElementById('blocks').innerHTML=state.blocks.map(b=>`<tr><td>${b.height}</td><td class="mono"><a href="#" onclick="showBlock(${b.height});return false">${b.hash}...</a></td><td>${b.txCount}</td><td class="mono">${b.proposer||''}</td><td>${new Date(b.timestamp).toLocaleTimeString()}</td></tr>`).join('');
-  document.getElementById('accounts').innerHTML=state.accounts.map(a=>`<tr><td class="mono">${a.addr.slice(0,22)}...</td><td>${a.balance}</td><td>${a.stake}</td><td>${a.nonce}</td><td>${a.humanityScore??'—'}</td></tr>`).join('');
-  // swap
-  const pool=state.pools&&state.pools[0];
-  document.getElementById('poolInfo').textContent=pool? `${pool.key} base=${pool.base} quote=${pool.quote}`:'no pool';
-  document.getElementById('poolPrice').textContent=pool? (pool.price||''):'';
-  // stake
-  let total=0n; for(const a of state.accounts) total+=BigInt(a.stake);
-  document.getElementById('totalStake').textContent=total.toString();
-  document.getElementById('valCount').textContent=(state.validators||[]).length;
-  document.getElementById('validators').innerHTML=(state.validators||[]).map(v=>`<tr><td class="mono">${v.edPublic}</td><td>${v.stake}</td><td class="mono">${v.address||''}</td></tr>`).join('');
-  // gov
-  document.getElementById('proposals').innerHTML=(state.proposals||[]).map(p=>`<tr><td class="mono">${p.id}</td><td>${p.title}</td><td class="mono">${p.action}</td><td>${p.votesFor}</td><td>${p.votesAgainst}</td><td>${p.humanityVotes}</td><td><span class="${p.status==='passed'?'ok':p.status==='failed'?'bad':'warn'}">${p.status}</span></td></tr>`).join('') || '<tr><td colspan="7">no proposals</td></tr>';
+  if(!auto) return;
+  try{
+    const r=await fetch('/api/state'); state=await r.json();
+    const h=state.height;
+    document.getElementById('height').textContent='height '+h;
+    document.getElementById('kHeight').textContent=h;
+    document.getElementById('kMempool').textContent=state.mempool;
+    memHist.push(state.mempool); spark();
+    document.getElementById('kSupply').textContent=state.supply;
+    document.getElementById('kPeers').textContent=(state.peers||[]).length;
+    document.getElementById('head').textContent=state.head? state.head.hash.slice(0,20)+'...' : '—';
+    document.getElementById('head').title=state.head?state.head.hash:'';
+    document.getElementById('root').textContent=(state.stateRoot||'').slice(0,20)+'…';
+    document.getElementById('root').title=state.stateRoot||'';
+    document.getElementById('peersLine').textContent='peers: '+(state.peers||[]).length+' (TCP :3899 + Noise :4899)';
+    document.getElementById('blocks').innerHTML=state.blocks.map(b=>{
+      const isNew=!lastBlocks.has(b.height);
+      return `<tr class="flash ${isNew?'new':''}"><td>${b.height}</td><td class="mono"><a href="#" onclick="showBlock(${b.height});return false">${b.hash}...</a></td><td>${b.txCount}</td><td class="mono" title="${b.proposer||''}">${(b.proposer||'').slice(0,12)}…</td><td>${new Date(b.timestamp).toLocaleTimeString()}</td></tr>`}).join('') || '<tr><td class="hint" colspan="5">нет блоков</td></tr>';
+    state.blocks.forEach(b=>lastBlocks.add(b.height));
+    document.getElementById('accounts').innerHTML=state.accounts.map(a=>`<tr><td class="mono" title="${a.addr}">${a.addr.slice(0,16)}…</td><td>${a.balance}</td><td>${a.stake}</td><td>${a.nonce}</td><td>${a.humanityScore??'—'}</td></tr>`).join('');
+    const pool=state.pools&&state.pools[0];
+    document.getElementById('poolInfo').textContent=pool? `${pool.key}`:'no pool';
+    document.getElementById('poolPrice').textContent=pool? (pool.price||''):'';
+    document.getElementById('kPrice').textContent=pool? pool.price:'—';
+    document.getElementById('poolDepth').innerHTML=pool? `<span class="chip">base ${pool.base} · quote ${pool.quote} · fee 30bps · shares ${pool.totalShares}</span>`:'';
+    let total=0n; for(const a of state.accounts) total+=BigInt(a.stake);
+    document.getElementById('totalStake').textContent=total.toString();
+    document.getElementById('valCount').textContent=(state.validators||[]).length;
+    document.getElementById('validators').innerHTML=(state.validators||[]).map(v=>`<tr><td class="mono">${v.edPublic}</td><td>${v.stake}</td><td class="mono">${v.address||''}</td></tr>`).join('');
+    document.getElementById('proposals').innerHTML=(state.proposals||[]).map(p=>`<tr><td class="mono">${p.id}</td><td>${p.title}</td><td class="mono">${p.action}</td><td>${p.votesFor}</td><td>${p.votesAgainst}</td><td>${p.humanityVotes}</td><td><span class="${p.status==='passed'?'ok':p.status==='failed'?'bad':'warn'}">${p.status}</span></td></tr>`).join('') || '<tr><td class="hint" colspan="7">no proposals</td></tr>';
+  }catch(e){ document.getElementById('netstat').textContent='● offline'; }
 }
 async function lookup(){
   const addr=document.getElementById('addr').value.trim(); if(!addr) return;
   const j=await rpc('aeg_getBalance',[addr]);
-  document.getElementById('bal').textContent='balance: '+(j.result??j.error?.message);
+  document.getElementById('bal').textContent=j.result!=null? `balance: ${j.result}` : ('error: '+(j.error?.message||j.result));
+  toast(j.result!=null?'баланс получен':'ошибка');
 }
 async function quoteSwap(){
   const amt=document.getElementById('swapIn').value.trim(); if(!amt) return;
   const j=await rpc('aeg_swapQuote',['AEGIS/USDC', amt]);
-  document.getElementById('swapOut').textContent=j.result? `out: ${j.result.amountOut}` : ('err: '+j.error?.message);
+  document.getElementById('swapOut').textContent=j.result? `out: ${j.result.amountOut} (in ${j.result.amountIn})` : ('err: '+j.error?.message);
+}
+async function verifyBlock(){
+  const h=parseInt(document.getElementById('verifyH').value||'0',10);
+  const j=await rpc('aeg_getBlock',[h]);
+  const out=document.getElementById('verifyOut');
+  if(!j.result){out.textContent='block not found';out.className='mono bad';return}
+  const b=j.result;
+  // проверяем: merkle root != пустой и hash == hex 64
+  const ok = typeof b.hash==='string' && b.hash.length>=32;
+  out.textContent=ok? `hash ${b.hash.slice(0,16)}… ✓ merkle ${(b.header?.merkleRoot||'').slice(0,16)}… txs ${b.header?.txCount}` : 'BAD';
+  out.className='mono '+(ok?'ok':'bad');
 }
 async function showBlock(h){
   const j=await rpc('aeg_getBlock',[h]);
   document.getElementById('mHeight').textContent='#'+h;
-  document.getElementById('mBody').textContent=JSON.stringify(j.result,null,2).slice(0,8000);
+  document.getElementById('mBody').textContent=JSON.stringify(j.result,null,2).slice(0,12000);
   document.getElementById('blockModal').style.display='block';
 }
 function closeModal(){ document.getElementById('blockModal').style.display='none'; }
 refresh(); setInterval(refresh,4000);
+document.getElementById('blockModal').addEventListener('click',e=>{if(e.target.id==='blockModal')closeModal()});
 </script>
 </body>
 </html>

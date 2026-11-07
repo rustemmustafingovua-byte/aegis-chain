@@ -29,26 +29,27 @@ python3 demo.py        # демо: нормальный юзер проходи�
 python3 -m pytest test_aegis.py -v   # тесты
 ```
 
-### v0.9 TypeScript Chain (как Lumen) + ML-DSA + Mesh + Infra
+### v1.0 TypeScript Chain (как Lumen) + ML-DSA + Mesh + Infra + Дизайн
 ```bash
 cd ~/workspace/workspace/aegis-chain
 npm install
-npm test               # 30 passing: hybrid ML-DSA, Chain, Shamir, Mesh, P2P, RPC, AMM, Governance, Bridge, v0.7 hardening + 6 forge tests
+npm test               # 35 passing: hybrid, Chain, Shamir, Mesh, P2P, RPC, AMM, Governance, Bridge, security (size guards, domain binding, liveness, replay) + 10 forge tests (AMM CEI/slippage, vault bounds, mint cap, conservation)
 npm run demo           # Ed25519+ML-DSA-65, intent, offline mesh, PoS block
 npm run build          # tsc → dist/
-npm run serve          # :8899 RPC+Explorer, :3899 P2P (живой узел)
+npm run serve          # :8899 RPC+Explorer v1.0, :3899 TCP + :4899 libp2p Noise (живой узел)
 npm run keeper         # автономный конвертер USDC→AEGIS
 ```
 
-### Мобильный кошелёк с Passkey
+### Мобильный кошелёк с Passkey (v1.0 — bottom nav, QR mesh, shield checklist, PWA)
 ```bash
 cd wallet-mobile
 npm install
 npm run dev            # → http://localhost:5188
+npm run build          # 310KB gzip 102KB — PWA manifest + icon
 # iPhone/Android: создай Passkey (Touch/Face ID), кошелёк шифруется им
 ```
 
-## Полная инфраструктура (v0.9)
+## Полная инфраструктура (v1.0)
 
 | Компонент | Где | Запуск |
 |---|---|---|
@@ -58,13 +59,13 @@ npm run dev            # → http://localhost:5188
 | **Mesh автономия** DTN epidemic, QR/BLE/LoRa | `core-ts/mesh.ts`, `autonomy.ts`, `docs/MESH.md` | `npm run mesh:demo` |
 | **P2P сеть** TCP gossip (blocks/txs/sync) | `core-ts/p2p.ts` | `aegis serve` |
 | **RPC** JSON-RPC 2.0 + REST | `core-ts/rpc.ts`, `GET /api/state` | `POST /api/rpc` |
-| **Explorer** живой, отдаётся узлом | `explorer/index.html` | `GET /` |
+| **Explorer** живой, отдаётся узлом (KPI, sparkline, hybrid-verify) | `explorer/index.html`, `docs/DESIGN.md` | `GET /` |
 | **Keeper** конвертер без биржи (AMM x*y=k 0.3%) | `keeper/keeper.ts` | `npm run keeper` |
-| **Контракты Base** ERC-20 + AMM | `contracts/AEGIS.sol`, `AegisAMM.sol` | `forge create` |
-| **Mobile Wallet** Passkey unwrap AES-GCM | `wallet-mobile/` | `npm run dev` |
+| **Контракты Base** ERC-20 mint-cap + AMM CEI/slippage + HTLC bounds | `contracts/AEGIS.sol`, `AegisAMM.sol`, `BridgeVault.sol` | `forge create` |
+| **Mobile Wallet** Passkey unwrap AES-GCM, QR, history, shield | `wallet-mobile/` | `npm run dev` |
 | **CI/CD** GH Actions, Docker, keepalive | `.github/workflows/ci.yml`, `scripts/aegis-keepalive.sh`, `Dockerfile` | — |
 
-Документация: `docs/INFRA.md`, `docs/MESH.md`, `docs/MOBILE.md`, `ARCHITECTURE.md`
+Документация: `docs/DESIGN.md`, `docs/API.md`, `docs/OPS.md`, `docs/THREAT_MODEL.md`, `docs/INFRA.md`, `docs/MESH.md`, `docs/MOBILE.md`, `ARCHITECTURE.md`
 
 ## Токеномика (черновик)
 

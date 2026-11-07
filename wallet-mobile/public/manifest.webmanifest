@@ -1,0 +1,13 @@
+{
+  "name": "AEGIS Wallet",
+  "short_name": "AEGIS",
+  "description": "Постквантовый кошелёк с Passkey и Anti-AI Shield",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0e1a",
+  "theme_color": "#0b0e1a",
+  "lang": "ru",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

@@ -43,7 +43,8 @@ export function signIntent(keys: HybridKeypair, tx: Omit<IntentTx, "humanContext
     timestamp: Date.now(),
   };
   const sig = hybridSign(keys, canonicalIntent(full));
-  const livenessResponse = hybridSign(keys, ch.challenge + "|" + localEntropy.toString("hex"));
+  // Liveness binds challenge + human_context (entropy commitment) — verifier can check without knowing entropy
+  const livenessResponse = hybridSign(keys, ch.challenge + "|" + humanContextHash);
   const txHash = sha256(canonicalIntent(full) + "|" + sig.hybrid);
   return { ...full, sig, livenessChallenge: ch.challenge, livenessResponse, txHash };
 }
@@ -52,6 +53,12 @@ export function verifyIntent(edPublicB64: string, mlPublicKey: Uint8Array, tx: S
   const msg = canonicalIntent(tx);
   if (!hybridVerify(edPublicB64, mlPublicKey, msg, tx.sig)) return { ok: false, reason: "hybrid sig mismatch (tampered intent/to/amount/domain?)" };
   if (tx.txHash !== sha256(msg + "|" + tx.sig.hybrid)) return { ok: false, reason: "tx hash mismatch" };
+  // Liveness: response must be hybrid sig over (challenge || human_context), not reused from other tx
+  if (!tx.livenessChallenge || !tx.livenessResponse) return { ok: false, reason: "missing liveness" };
+  const livenessMsg = `${tx.livenessChallenge}|${tx.humanContextHash}`;
+  // NOTE: challenge derivation needs block hash, so here we verify response integrity:
+  // response must verify under same keys (proves possession live-ish), domain binding already via msg.
+  if (!hybridVerify(edPublicB64, mlPublicKey, livenessMsg, tx.livenessResponse)) return { ok: false, reason: "liveness response mismatch" };
   return { ok: true, reason: "ok" };
 }
 export function behavioralScore(intervalsMs: number[], humanContextHash: string, confirmMs: number): { score: number; flags: string[]; mean: number; std: number; verdict: "allow" | "review" | "blocked" } {

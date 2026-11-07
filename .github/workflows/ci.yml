@@ -27,3 +27,12 @@ jobs:
           export PATH="$HOME/.foundry/bin:$HOME/.config/.foundry/bin:$PATH"
           foundryup
           cd contracts && forge test -vv
+      - name: Wallet build
+        run: |
+          cd wallet-mobile
+          npm ci
+          npm run build
+      - name: Audit artifact (contracts grep)
+        run: |
+          echo "contracts: $(ls -1 contracts/*.sol)"
+          echo "--- slither skipped (needs solc; run locally: pip install slither-analyzer && slither .)"
