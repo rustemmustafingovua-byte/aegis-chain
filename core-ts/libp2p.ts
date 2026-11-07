@@ -1,8 +1,10 @@
 /**
- * AEGIS libp2p Noise Transport v0.9 — production P2P поверх js-libp2p
+ * AEGIS libp2p Noise Transport v1.2 — production P2P поверх js-libp2p
  *
  * v0.8: P2pNode (TCP lite, node:net) — bootstrap + LoRa/USB fallback.
- * v0.9: Libp2pNode — full libp2p stack:
+ * v0.9: Libp2pNode — full libp2p stack: TCP + Noise (Noise_XX_25519_AESGCM_SHA256)
+ * v1.2: gossipsub миграция — pub/sub на topic /aegis/1.0/gossip (тот же P2pMessage JSON),
+ *   stream protocol /aegis/1.0/gossip оставлен как fallback + direct dial
  *   transports: TCP (/ip4/0.0.0.0/tcp/PORT) — production internet path
  *   connectionEncrypters: Noise (Noise_XX_25519_AESGCM_SHA256 pureJsCrypto)
  *   streamMuxer: default mplex (multiplexed gossip streams per peer)
@@ -11,12 +13,8 @@
  *   scoring: identical to P2pNode (invalid block/tx -> -score, ban at <= -100)
  *   rate-limit: 50 msg/sec/peer, 256KB/msg, sync cap 100 blocks
  *
- * Design choice: custom gossip protocol over libp2p streams instead of gossipsub —
- *  - no extra @libp2p/gossipsub dep (floodsub would need pubsub router + peer scoring second impl)
- *  - reuses the audited P2pMessage handler semantics from p2p.ts (single source of truth for validation)
- *  - mesh/offline packets (QR/BLE/LoRa) stay on P2pMessage schema, so DTN relay is transport-agnostic
- *  - upgrade path: swap stream handler for gossipsub without changing validation (publish on topic
- *    `/aegis/1.0/gossip`, same JSON body) — documented in docs/MESH.md
+ * Design: gossipsub pub/sub + stream fallback — оба транспорта несут один P2pMessage JSON,
+ *   валидация единая (onMessage), mesh/offline пакеты транспортно-независимы (DTN relay).
  *
  * Roles:
  *  - internet connected nodes: Libp2pNode (Noise-encrypted, libp2p dial)
@@ -26,6 +24,8 @@
 import { createLibp2p, type Libp2p } from "libp2p";
 import { noise } from "@libp2p/noise";
 import { tcp } from "@libp2p/tcp";
+import { gossipsub, StrictNoSign } from "@libp2p/gossipsub";
+import { identify } from "@libp2p/identify";
 import type { Chain, Block } from "./chain.js";
 import { parseTx, stringify, type Tx } from "./ledger.js";
 import { verify, sign } from "./crypto.js";
@@ -33,7 +33,7 @@ import type { P2pMessage } from "./p2p.js";
 import { peerIdFromString } from "@libp2p/peer-id";
 
 export const AEGIS_PROTOCOL = "/aegis/1.0/gossip";
-export const AEGIS_TOPIC = "/aegis/1.0/gossip"; // gossipsub-compatible topic name (future switch)
+export const AEGIS_TOPIC = "/aegis/1.0/gossip"; // gossipsub topic — same JSON body as stream protocol
 export const AEGIS_CHAIN_ID = "aegis-1";
 
 const MAX_MSG_BYTES = 256 * 1024;
@@ -93,8 +93,35 @@ export class Libp2pNode {
       addresses: { listen: [listenAddr] },
       transports: [tcp()],
       connectionEncrypters: [noise()],
-      // streamMixers: default mplex — multiple gossip streams per peer
+      services: {
+        identify: identify() as any,
+        gossipsub: gossipsub({
+          globalSignaturePolicy: StrictNoSign, // we auth via HELLO hybrid (chain-level), libp2p key not identity
+        }) as any,
+      } as any,
     });
+
+    // gossipsub pub/sub — primary transport (mesh fanout, no direct dial needed)
+    try {
+      const gs: any = (this.libp2p as any).services.gossipsub;
+      gs.subscribe(AEGIS_TOPIC);
+      gs.addEventListener("gossipsub:message", (evt: any) => {
+        try {
+          const detail = (evt as any).detail;
+          const fromPeer = detail.propagationSource?.toString?.() ?? "gossipsub";
+          const data: Uint8Array = detail.msg?.data;
+          if (!data) return;
+          if (data.byteLength > MAX_MSG_BYTES) return;
+          const line = new TextDecoder().decode(data).trim();
+          if (!line) return;
+          this.ensurePeer(fromPeer);
+          this.onMessage(fromPeer, line);
+        } catch {}
+      });
+      console.log(`[libp2p ${this.nodeId}] gossipsub subscribed ${AEGIS_TOPIC}`);
+    } catch (e: any) {
+      console.warn(`[libp2p ${this.nodeId}] gossipsub init failed: ${e.message} — fallback to stream gossip`);
+    }
 
     // handle inbound gossip streams from dialing peers
     await this.libp2p.handle(AEGIS_PROTOCOL, async (stream: any, connection: any) => {
@@ -311,6 +338,16 @@ export class Libp2pNode {
   }
 
   broadcast(msg: P2pMessage, exclude?: string) {
+    // gossipsub fast-path (topic fanout) + stream fanout fallback
+    try {
+      const gs: any = (this.libp2p as any)?.services?.gossipsub;
+      if (gs) {
+        const line = JSON.stringify(msg, (_k, v) => (typeof v === "bigint" ? v.toString() : v));
+        if (Buffer.byteLength(line) <= MAX_MSG_BYTES) {
+          void gs.publish(AEGIS_TOPIC, new TextEncoder().encode(line)).catch(() => {});
+        }
+      }
+    } catch {}
     for (const [pid, st] of this.peers) {
       if (st.banned || pid === exclude) continue;
       this.send(pid, msg);

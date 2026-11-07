@@ -52,7 +52,7 @@ test("comprehensive: metrics endpoint shape", async () => {
     assert.match(txt, /aegis_supply/);
     const h = await fetch(`http://127.0.0.1:${port}/health`);
     const hj = await h.json();
-    assert.equal(hj.version, "1.1.0");
+    assert.equal(hj.version, "1.2.0");
   } finally { server.close(); }
 });
 
@@ -77,4 +77,13 @@ test("comprehensive: bridge quote non-zero for funded pool", () => {
   const br = new Bridge();
   const out = br.quoteBaseToAegis(1_000_000n, 1_000_000_000_000n, 1_000_000_000_000n);
   assert.ok(out > 0n);
+});
+
+test("comprehensive: snapshot and prune keep genesis anchor", () => {
+  const chain = new Chain();
+  chain.genesis();
+  const s = chain.snapshot();
+  assert.equal(s.height, 0);
+  assert.ok(s.hash.length === 16);
+  assert.equal(chain.prune(100), 0); // nothing to prune
 });

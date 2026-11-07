@@ -6,7 +6,7 @@
 cd ~/workspace/workspace/aegis-chain
 npm ci && npm run build
 npm run serve -- --port=8899
-curl http://127.0.0.1:8899/health   # {"ok":true,"version":"1.1.0"}
+curl http://127.0.0.1:8899/health   # {"ok":true,"version":"1.2.0"}
 curl http://127.0.0.1:8899/metrics  # aegis_height, supply …
 ```
 

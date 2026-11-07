@@ -181,6 +181,31 @@ export default function App() {
 
   function copyText(t: string) { navigator.clipboard.writeText(t); showToast("Скопировано"); }
 
+  async function onScan() {
+    try {
+      const bd: any = (window as any).BarcodeDetector;
+      if (!bd) { setStatus("BarcodeDetector не доступен в этом браузере — вставь адрес вручную"); return; }
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const video = document.createElement("video");
+      video.srcObject = stream; await video.play();
+      const det = new bd({ formats: ["qr_code"] });
+      const start = Date.now();
+      while (Date.now() - start < 8000) {
+        const codes = await det.detect(video);
+        if (codes?.length) {
+          const txt = codes[0].rawValue || "";
+          stream.getTracks().forEach((t) => t.stop());
+          if (txt.startsWith("aeg1")) { setTo(txt); showToast("Адрес отсканирован"); }
+          else { setTo(txt); showToast("QR считан — как адрес"); }
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      stream.getTracks().forEach((t) => t.stop());
+      setStatus("QR не найден за 8с");
+    } catch (e: any) { setStatus(`Сканер недоступен: ${e.message}`); }
+  }
+
   return (
     <div className="app">
       <div className="hero">
@@ -208,7 +233,9 @@ export default function App() {
       {tab === "send" && (
         <div className="card">
           <h3>Intent-bound платёж</h3>
-          <label>Кому (aeg1…)</label><input value={to} onChange={(e) => setTo(e.target.value)} placeholder="aeg1…" />
+          <label>Кому (aeg1…)</label>
+          <div style={{ display: "flex", gap: 6 }}><input value={to} onChange={(e) => setTo(e.target.value)} placeholder="aeg1…" style={{ flex: 1 }} />
+          <button className="secondary" style={{ width: "auto" }} onClick={onScan}>📷 scan</button></div>
           <label>Сумма (base units, 6 decimals)</label><input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1000000" />
           <label>Зачем (intent — видно человеку и сети)</label><input value={intent} onChange={(e) => setIntent(e.target.value)} placeholder="продажа велосипеда #4721" />
           <label>Домен (domain binding — фишинг уже не сработает)</label><input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="marketplace.aegis.local" />

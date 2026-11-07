@@ -246,6 +246,20 @@ export class Chain {
     if (total === 0n) return false;
     return this.totalStake() >= (total * 2n) / 3n;
   }
+  // ---- snapshot / prune (v1.2: cheap archives without full replay) ----
+  snapshot(): { hash: string; height: number; stateRoot: string; size: number } {
+    const data = this.serialize();
+    return { hash: sha256(data).slice(0, 16), height: this.height, stateRoot: this.ledger.stateRoot(), size: data.length };
+  }
+  /** Prune old blocks, keep last keepN + genesis anchor. Returns new prunedHeight. */
+  prune(keepN = 100): number {
+    if (this.blocks.length <= keepN + 1) return this.prunedHeight;
+    const cut = this.blocks.length - (keepN + 1); // keep genesis + last keepN
+    const keep = [this.blocks[0], ...this.blocks.slice(this.blocks.length - keepN)];
+    this.prunedHeight += cut;
+    this.blocks = keep;
+    return this.prunedHeight;
+  }
   // ---- persistence (node restart survival) ----
   serialize(): string {
     return JSON.stringify({

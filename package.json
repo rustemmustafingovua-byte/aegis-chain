@@ -1,6 +1,6 @@
 {
   "name": "aegis-chain",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "AEGIS — post-quantum hybrid chain with anti-AI shield, offline mesh autonomy, P2P network, RPC, explorer, keeper and Passkey wallet",
   "type": "module",
   "license": "MIT",
@@ -64,10 +64,13 @@
     "ARCHITECTURE.md"
   ],
   "dependencies": {
-    "@noble/post-quantum": "0.7.1",
-    "libp2p": "^3.5.1",
+    "@chainsafe/libp2p-identify": "^1.0.0",
+    "@libp2p/gossipsub": "^15.0.23",
+    "@libp2p/identify": "^3.0.39",
     "@libp2p/noise": "^17.0.0",
-    "@libp2p/tcp": "^11.0.32"
+    "@libp2p/tcp": "^11.0.32",
+    "@noble/post-quantum": "0.7.1",
+    "libp2p": "^3.5.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

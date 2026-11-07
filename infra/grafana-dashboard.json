@@ -1,0 +1,11 @@
+{
+  "title": "AEGIS Node — v1.2",
+  "uid": "aegis-v12",
+  "panels": [
+    { "title": "Height", "type": "stat", "targets": [{ "expr": "aegis_height" }] },
+    { "title": "Mempool", "type": "stat", "targets": [{ "expr": "aegis_mempool" }] },
+    { "title": "Blocks", "type": "stat", "targets": [{ "expr": "aegis_blocks" }] },
+    { "title": "Supply", "type": "stat", "targets": [{ "expr": "aegis_supply" }] },
+    { "title": "Uptime", "type": "stat", "targets": [{ "expr": "aegis_uptime_seconds" }] }
+  ]
+}
