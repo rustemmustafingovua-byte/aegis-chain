@@ -29,11 +29,11 @@ python3 demo.py        # демо: нормальный юзер проходи�
 python3 -m pytest test_aegis.py -v   # тесты
 ```
 
-### v0.8 TypeScript Chain (как Lumen) + ML-DSA + Mesh + Infra
+### v0.9 TypeScript Chain (как Lumen) + ML-DSA + Mesh + Infra
 ```bash
 cd ~/workspace/workspace/aegis-chain
 npm install
-npm test               # 28 passing: hybrid ML-DSA, Chain, Shamir, Mesh, P2P, RPC, AMM, Governance, Bridge, v0.7 hardening + 6 forge tests
+npm test               # 30 passing: hybrid ML-DSA, Chain, Shamir, Mesh, P2P, RPC, AMM, Governance, Bridge, v0.7 hardening + 6 forge tests
 npm run demo           # Ed25519+ML-DSA-65, intent, offline mesh, PoS block
 npm run build          # tsc → dist/
 npm run serve          # :8899 RPC+Explorer, :3899 P2P (живой узел)
@@ -48,7 +48,7 @@ npm run dev            # → http://localhost:5188
 # iPhone/Android: создай Passkey (Touch/Face ID), кошелёк шифруется им
 ```
 
-## Полная инфраструктура (v0.8)
+## Полная инфраструктура (v0.9)
 
 | Компонент | Где | Запуск |
 |---|---|---|

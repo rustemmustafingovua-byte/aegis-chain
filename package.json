@@ -1,6 +1,6 @@
 {
   "name": "aegis-chain",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "AEGIS — post-quantum hybrid chain with anti-AI shield, offline mesh autonomy, P2P network, RPC, explorer, keeper and Passkey wallet",
   "type": "module",
   "license": "MIT",
@@ -15,6 +15,7 @@
     "./chain": "./dist/core-ts/chain.js",
     "./rpc": "./dist/core-ts/rpc.js",
     "./p2p": "./dist/core-ts/p2p.js",
+    "./libp2p": "./dist/core-ts/libp2p.js",
     "./mesh": "./dist/core-ts/mesh.js"
   },
   "engines": {

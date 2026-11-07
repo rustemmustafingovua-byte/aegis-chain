@@ -1,7 +1,8 @@
 /**
- * AEGIS Server v0.7 — RPC + Explorer + P2P в одном процессе (как lumen serve --port=8899)
- * v0.7: persistence (state file), auto-proposer loop with slot timer,
- * wires MeshNode for offline settlement, Governance + Bridge.
+ * AEGIS Server v0.9 — RPC + Explorer + P2P в одном процессе (как lumen serve --port=8899)
+ * v0.9: persistence (state file), auto-proposer loop with slot timer,
+ * wires MeshNode for offline settlement, Governance + Bridge,
+ * dual transport: P2pNode (TCP lite, bootstrap/LoRa fallback) + Libp2pNode (Noise, production).
  */
 import * as http from "node:http";
 import * as fs from "node:fs";
@@ -10,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { Chain, SLOT_MS } from "./chain.js";
 import { createRpcServer } from "./rpc.js";
 import { P2pNode } from "./p2p.js";
+import { Libp2pNode } from "./libp2p.js";
 import { Governance } from "./governance.js";
 import { Bridge } from "./bridge.js";
 import { Discovery, BOOTSTRAP } from "./discovery.js";
@@ -82,9 +84,17 @@ export async function serveNode(port = 8899, p2pPort = 3899, opts: ServeOpts = {
   });
   await new Promise<void>((resolve) => httpServer.listen(port, () => resolve()));
   console.log(`[aegis] node+rpc+explorer on :${port} height=${chain.height}`);
+  // dual transport: P2pNode (TCP lite, bootstrap/LoRa fallback) + Libp2pNode (Noise, production)
   const p2p = new P2pNode(chain, `aegis-node-${port}`, p2pPort, validator ? { edPrivate: validator.edPrivate, edPublic: validator.edPublic } : undefined);
   await p2p.listen();
   deps.p2p = p2p; // wire p2p into RPC deps (late-binding)
+  const libp2pNode = new Libp2pNode(chain, {
+    listenPort: p2pPort + 1000,
+    nodeId: `aegis-node-${port}`,
+    signKey: validator ? { edPrivate: validator.edPrivate, edPublic: validator.edPublic } : undefined,
+  });
+  await libp2pNode.start();
+  (deps as any).libp2p = libp2pNode;
   // auto-proposer: produce block each slot if mempool non-empty or validator idle
   let slot = chain.height + 1;
   let timer: NodeJS.Timeout | null = null;
@@ -97,6 +107,7 @@ export async function serveNode(port = 8899, p2pPort = 3899, opts: ServeOpts = {
           if (chain.mempool.size > 0) {
             const block = chain.produceNextBlock(validator, slot);
             p2p.gossipBlock(block);
+            libp2pNode.gossipBlock(block);
             console.log(`[aegis] produced block height=${block.header.height} txs=${block.header.txCount}`);
             // persist after each block (cheap for devnet; prod: async WAL)
             try { chain.saveToFile(stateFile); } catch (e: any) { console.warn("[aegis] persist failed:", e.message); }
@@ -117,10 +128,11 @@ export async function serveNode(port = 8899, p2pPort = 3899, opts: ServeOpts = {
   const stop = () => {
     if (timer) clearInterval(timer);
     p2p.close();
+    void libp2pNode.close();
     httpServer.close();
     try { chain.saveToFile(stateFile); } catch {}
   };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
-  return { chain, httpServer, p2p, gov, bridge, discovery, mesh, validator, stop };
+  return { chain, httpServer, p2p, libp2pNode, gov, bridge, discovery, mesh, validator, stop };
 }

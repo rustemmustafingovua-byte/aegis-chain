@@ -8,6 +8,7 @@ export * from "./ledger.js";
 export * from "./chain.js";
 export * from "./rpc.js";
 export * from "./p2p.js";
+export * from "./libp2p.js";
 export * from "./governance.js";
 export * from "./discovery.js";
 export * from "./bridge.js";

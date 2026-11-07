@@ -1,4 +1,4 @@
-# AEGIS Infra — полная инфраструктура (v0.8)
+# AEGIS Infra — полная инфраструктура (v0.9)
 
 ## Карта
 
@@ -13,7 +13,7 @@
 │  chain (PoS 2/3) + ledger + mempool         │
 │  /api/rpc  /api/state  /health              │
 │  explorer/index.html (статика)              │
-│  P2P TCP :3899 + libp2p Noise (v0.8) gossip blocks/txs          │
+│  P2P TCP :3899 + libp2p Noise :4899 (v0.9) gossip blocks/txs          │
 └──────────────────┬──────────────────────────┘
                    │ Base / mesh
 ┌──────────────────▼──────────────────────────┐
@@ -47,7 +47,7 @@ POST /api/rpc  {"jsonrpc":"2.0","id":1,"method":"aeg_getState","params":[]}
   aeg_sendTx(tx) | aeg_meshStatus | aeg_sync
 
 GET  /api/state  -> { height, head, supply, accounts[], blocks[] }
-GET  /health     -> { ok:true, height, version:"0.8.0" }
+GET  /health     -> { ok:true, height, version:"0.9.0" }
 ```
 
 ## P2P
