@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { createPasskey, authPasskey, encryptKeys, decryptKeys, localEntropy } from "./lib/passkey";
 import { hybridGenerate, signIntent, offlinePacket, behavioralScore } from "./lib/aegis-wallet";
+import { splitSecret, recoverSecret, backupJson, parseBackup, secretFingerprint } from "./lib/shamir";
 
 type Stored = { iv: string; ct: string; credentialId: string; address: string };
 type TxItem = { hash: string; to: string; amount: string; intent: string; verdict: string; score: number; ts: number };
@@ -20,6 +21,10 @@ export default function App() {
   const [meshPacket, setMeshPacket] = useState("");
   const [qrData, setQrData] = useState("");
   const [balance, setBalance] = useState("—");
+  const [rpcUrl, setRpcUrl] = useState(() => localStorage.getItem("aegis.rpc") || "");
+  const [backup, setBackup] = useState("");
+  const [backupInput, setBackupInput] = useState("");
+  const [shares, setShares] = useState<any[] | null>(null);
   const [history, setHistory] = useState<TxItem[]>(() => {
     try { return JSON.parse(localStorage.getItem("aegis.history") || "[]"); } catch { return []; }
   });
@@ -122,13 +127,56 @@ export default function App() {
   async function checkBalance() {
     if (!address) return;
     try {
-      // best-effort: локальный RPC если настроен, иначе — без баланса
-      const rpc = localStorage.getItem("aegis.rpc") || "";
-      if (!rpc) { setBalance("RPC не задан — задай aegis.rpc в localStorage для on-chain баланса"); return; }
+      const rpc = rpcUrl || localStorage.getItem("aegis.rpc") || "";
+      if (!rpc) { setBalance("RPC не задан — укажи в настройках (Shield tab)"); return; }
       const r = await fetch(rpc, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "aeg_getBalance", params: [address] }) });
       const j = await r.json();
       setBalance(j.result != null ? String(j.result) : "err: " + j.error?.message);
     } catch (e: any) { setBalance("err: " + e.message); }
+  }
+
+  function saveRpc() { localStorage.setItem("aegis.rpc", rpcUrl); showToast("RPC сохранён"); }
+
+  function onBackup() {
+    if (!keys) return setStatus("Сначала разблокируй для бэкапа");
+    // split edPrivate (32 bytes) 3-of-5
+    const s = splitSecret(keys.edPrivate, 5, 3);
+    setShares(s);
+    setBackup(backupJson(s));
+    setStatus(`Бэкап Shamir 3-of-5 создан. Fingerprint ${secretFingerprint(keys.edPrivate)}. Распечатай 2 шары, 1 — HSM, 1 — доверенное лицо, 1 — телефон.`);
+  }
+
+  async function onRestore() {
+    try {
+      const s = parseBackup(backupInput);
+      if (s.length < 3) throw new Error("нужно минимум 3 шары");
+      const secret = recoverSecret(s, 32);
+      const kp = hybridGenerate(secret);
+      setKeys(kp); setAddress(kp.address);
+      setStatus(`Восстановлено из Shamir. Адрес ${kp.address}. Создай новый Passkey чтобы перешифровать.`);
+    } catch (e: any) { setStatus(`Восстановление неудалось: ${e.message}`); }
+  }
+
+  async function onSendRpc() {
+    if (!signedTx) return setStatus("Сначала подпиши онлайн");
+    const rpc = rpcUrl || localStorage.getItem("aegis.rpc") || "";
+    if (!rpc) return setStatus("Укажи RPC endpoint");
+    try {
+      const tx = signedTx.tx;
+      // map wallet intent → ledger Tx (to/amount/fee/nonce/intent/domain)
+      const acct = address;
+      const body = { from: acct, to, amount: BigInt(amount).toString(), fee: "1000", nonce: 0, intent: intent || "платёж", domain: domain || "aegis.local", timestamp: Date.now(), sig: tx.sig, mlPublicKeyB64: Buffer.from(keys.mlPublicKey).toString("base64"), data: "" };
+      // nonce лучше брать с чеыйна
+      const rpc2 = rpc.replace(/\/rpc$/, "");
+      const bal = await fetch(rpc, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "aeg_getAccount", params: [acct] }) }).then(r => r.json());
+      body.nonce = bal.result?.nonce ?? 0;
+      // re-sign over ledger canonical? Wallet hybrid sig is over intent canonical; ledger verifies over txMessage.
+      // For demo devnet: faucet + sendTx pipeline expects hybrid over txMessage; wallet signs intent — чеыйн примет, если mlPub matches.
+      // Тут: просто отправим и покажем ответ (если canApply fails — вердикт сети)
+      const r = await fetch(rpc, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "aeg_sendTx", params: [body] }) });
+      const j = await r.json();
+      setStatus(j.result?.accepted ? `Отправлено в сеть, mempool ${j.result.mempool}` : `Сеть отклонила: ${j.error?.message}`);
+    } catch (e: any) { setStatus(`Отправка неудалась: ${e.message}`); }
   }
 
   function copyText(t: string) { navigator.clipboard.writeText(t); showToast("Скопировано"); }
@@ -136,7 +184,7 @@ export default function App() {
   return (
     <div className="app">
       <div className="hero">
-        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.0</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span></div>
+        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.1</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span></div>
         <h1>Щит Афины.<br />Ключи — в железе, намерение — на экране.</h1>
         <p>Hybrid Ed25519 + ML-DSA-65 · Intent-Bound · Offline Mesh. Агент не подпишет за тебя: нужны Passkey + живой человек + домен.</p>
       </div>
@@ -174,6 +222,7 @@ export default function App() {
               <div className="mono">txHash {signedTx.tx.txHash.slice(0, 40)}…</div>
               <div>Behavioral: <span className={signedTx.behav.verdict === "allow" ? "ok" : signedTx.behav.verdict === "review" ? "warn" : "bad"}>{signedTx.behav.score}/100 {signedTx.behav.verdict}</span> — {signedTx.behav.flags.join(", ")}</div>
               <div className="mono" style={{ marginTop: 6, fontSize: 12 }}>hybrid {signedTx.tx.sig.hybrid.slice(0, 32)}…</div>
+              <button className="btn" onClick={onSendRpc} style={{ marginTop: 8 }}>Отправить в сеть (RPC)</button>
             </div>
           )}
           {meshPacket && (
@@ -221,6 +270,21 @@ export default function App() {
             <li>✅ <span><b>Mesh + Nullifier:</b> офлайн трата не двоится при синке</span></li>
           </ul>
           <div className="divider" />
+          <details open><summary>Сеть (RPC)</summary>
+            <label>RPC endpoint</label>
+            <input value={rpcUrl} onChange={(e) => setRpcUrl(e.target.value)} placeholder="http://127.0.0.1:8899/rpc" />
+            <button className="btn secondary" onClick={saveRpc} style={{ marginTop: 6 }}>Сохранить RPC</button>
+            <div className="hint" style={{ marginTop: 6 }}>Баланс, nonce и отправка tx идут через этот endpoint.</div>
+          </details>
+          <details><summary>Бэкап Shamir 3-of-5</summary>
+            <div className="hint" style={{ marginTop: 6 }}>Раздели приватный ключ на 5 шар (3 восстанавливают). Храни в разных местах.</div>
+            <button className="btn" onClick={onBackup} style={{ marginTop: 8 }}>Создать бэкап</button>
+            {backup && <><textarea rows={8} value={backup} readOnly style={{ marginTop: 8 }} /><button className="btn secondary" onClick={() => copyText(backup)}>Скопировать бэкап</button></>}
+            <label style={{ marginTop: 10 }}>Восстановить из JSON (3+ шары)</label>
+            <textarea rows={6} value={backupInput} onChange={(e) => setBackupInput(e.target.value)} placeholder='{"v":"aegis-shamir-3/5","shares":[…]}' />
+            <button className="btn secondary" onClick={onRestore}>Восстановить</button>
+            {shares && (<div className="hint" style={{ marginTop: 6 }}>Шары: {shares.map((s: any) => `x=${s.x}`).join(", ")}</div>)}
+          </details>
           <details><summary>Что делать при подозрении?</summary>
             <div className="hint" style={{ marginTop: 6 }}>1) Закрой сессию (перезагрузи). 2) Проверь адрес получателя глазами, а не из буфера. 3) Проверь intent в истории. 4) Если Passkey скомпрометирован — создай новый кошелёк и перемести средства.</div>
           </details>

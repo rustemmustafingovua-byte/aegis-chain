@@ -1,11 +1,21 @@
 services:
   aegis-node:
     build: .
+    user: "0"
     ports:
       - "8899:8899"
       - "3899:3899"
-    command: ["npm", "run", "serve", "--", "--port=8899"]
+      - "4899:4899"
+    environment:
+      - AEGIS_FAUCET=on
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8899/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    command: ["npm", "run", "serve", "--", "--port=8899"]
   wallet:
     build:
       context: wallet-mobile

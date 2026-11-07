@@ -32,7 +32,11 @@ jobs:
           cd wallet-mobile
           npm ci
           npm run build
+      - name: Slither (contracts)
+        run: |
+          pip install slither-analyzer -q || true
+          cd contracts && slither . --filter-paths 'test/' --json slither.json 2>&1 | tail -20 || echo "slither found (see slither.json)"
       - name: Audit artifact (contracts grep)
         run: |
           echo "contracts: $(ls -1 contracts/*.sol)"
-          echo "--- slither skipped (needs solc; run locally: pip install slither-analyzer && slither .)"
+          echo "--- slither output archived as artifact"

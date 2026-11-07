@@ -1,4 +1,4 @@
-# AEGIS Security Policy — v1.0
+# AEGIS Security Policy — v1.1
 
 ## Threat model (anti-hacker + anti-AI-agent)
 

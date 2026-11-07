@@ -67,7 +67,7 @@ export async function serveNode(port = 8899, p2pPort = 3899, opts: ServeOpts = {
   const here = (import.meta as any).dirname ?? path.dirname(fileURLToPath(import.meta.url));
   const root = path.resolve(here, "../explorer");
   const httpServer = http.createServer((req, res) => {
-    if (req.url?.startsWith("/api/") || req.url === "/rpc" || req.url === "/health") {
+    if (req.url?.startsWith("/api/") || req.url === "/rpc" || req.url === "/health" || req.url === "/metrics") {
       return rpc.emit("request", req, res);
     }
     const file = req.url === "/" ? path.join(root, "index.html") : path.join(root, req.url!);

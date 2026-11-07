@@ -1,7 +1,8 @@
 /**
- * AEGIS RPC v0.8 — JSON-RPC 2.0 поверх HTTP (как Lumen)
+ * AEGIS RPC v1.1 — JSON-RPC 2.0 поверх HTTP (как Lumen)
  * Методы: aeg_getState, aeg_getBlock, aeg_getBalance, aeg_sendTx, aeg_meshStatus, aeg_sync
  * v0.7: aeg_sendTx validates (canApply) before mempool, + pool/stake/gov/bridge methods
+ * v1.1: + aeg_faucet (devnet), aeg_registerValidator, aeg_metrics / /metrics, libp2p gossip
  */
 import * as http from "node:http";
 import { Chain } from "./chain.js";
@@ -10,11 +11,12 @@ import { MeshNode } from "./mesh.js";
 import { Governance } from "./governance.js";
 import { Bridge } from "./bridge.js";
 import type { P2pNode } from "./p2p.js";
+import type { Libp2pNode } from "./libp2p.js";
 
 type RpcRequest = { jsonrpc: string; id: number | string; method: string; params: any[] };
 type RpcResponse = { jsonrpc: "2.0"; id: number | string; result?: unknown; error?: { code: number; message: string } };
 
-export type RpcDeps = { gov?: Governance; bridge?: Bridge; p2p?: P2pNode };
+export type RpcDeps = { gov?: Governance; bridge?: Bridge; p2p?: P2pNode; libp2p?: Libp2pNode };
 
 export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {}) {
   const server = http.createServer(async (req, res) => {
@@ -22,7 +24,21 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
     res.setHeader("Access-Control-Allow-Headers", "content-type");
     if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
 
-    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.0.0" })); }
+    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.1.0" })); }
+    if (req.url === "/metrics") {
+      res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4" });
+      const lines = [
+        `aegis_height ${chain.height}`,
+        `aegis_mempool ${chain.mempool.size}`,
+        `aegis_blocks ${chain.blocks.length}`,
+        `aegis_accounts ${chain.ledger.accounts.size}`,
+        `aegis_validators ${chain.validators.size}`,
+        `aegis_supply ${chain.ledger.totalSupply().toString()}`,
+        `aegis_state_root "${chain.ledger.stateRoot()}"`,
+        `aegis_uptime_seconds ${Math.floor(process.uptime())}`,
+      ];
+      return res.end(lines.join("\n") + "\n");
+    }
     if (req.url === "/api/state") {
       res.writeHead(200, { "Content-Type": "application/json" });
       const pools = [...chain.ledger.pools.entries()].map(([key, p]) => ({
@@ -92,8 +108,9 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
         const tx = parseTx(params[0]);
         chain.ledger.canApply(tx);
         chain.mempool.add(tx);
-        // gossip to peers if attached
+        // gossip to peers if attached (dual transport)
         try { deps.p2p?.gossipTx(tx); } catch {}
+        try { (deps as any).libp2p?.gossipTx(tx); } catch {}
         return { accepted: true, mempool: chain.mempool.size, txHash: chain.ledger.stateRoot().slice(0, 16) };
       }
       case "aeg_swapQuote": {
@@ -130,7 +147,34 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
       }
       case "aeg_validatorList": return [...chain.validators.entries()].map(([pk, v]) => ({ edPublic: pk, stake: v.stake.toString(), address: v.address ?? null }));
       case "aeg_peerList": return deps.p2p ? deps.p2p.peerList() : [];
+      case "aeg_libp2pPeers": return (deps as any).libp2p ? (deps as any).libp2p.peerList() : [];
       case "aeg_meshStatus": return mesh ? { mempool: mesh.mempool.size, peers: [...mesh.peers], stats: mesh.stats, snapshot: mesh.snapshot } : { mesh: "not attached" };
+      case "aeg_faucet": {
+        // devnet faucet — disabled in prod (mainnet custody). Rate-limited per address.
+        if (process.env.AEGIS_FAUCET === "off") throw new Error("faucet disabled");
+        const [addr, amountRaw] = params as [string, string?];
+        if (!addr || !addr.startsWith("aeg1")) throw new Error("bad address");
+        const amount = BigInt(amountRaw ?? "10000000000"); // default 10k AEGIS
+        if (amount <= 0n || amount > 1_000_000_000_000n) throw new Error("bad amount");
+        const acct = chain.ledger.get(addr);
+        if ((acct as any)._faucetCount > 5) throw new Error("faucet rate limit (5/address)");
+        (acct as any)._faucetCount = ((acct as any)._faucetCount ?? 0) + 1;
+        chain.ledger.fund(addr, amount);
+        return { funded: addr, amount: amount.toString(), balance: chain.ledger.balance(addr).toString() };
+      }
+      case "aeg_registerValidator": {
+        const [edPublic, mlPublicKeyB64, stakeRaw, address] = params as [string, string, string, string?];
+        if (!edPublic || !mlPublicKeyB64) throw new Error("bad keys");
+        const stake = BigInt(stakeRaw);
+        if (stake < 10_000n * 1_000_000n) throw new Error("min stake 10k AEGIS");
+        if (address) {
+          const bal = chain.ledger.balance(address);
+          if (bal < stake) throw new Error("insufficient balance for stake");
+        }
+        chain.addValidator(edPublic, mlPublicKeyB64, stake, address);
+        return { registered: edPublic.slice(0, 20) + "…", stake: stake.toString() };
+      }
+      case "aeg_metrics": return { height: chain.height, mempool: chain.mempool.size, blocks: chain.blocks.length, validators: chain.validators.size, uptime: Math.floor(process.uptime()) };
       case "aeg_sync": return { height: chain.height, blocks: chain.blocks.length, stateRoot: chain.ledger.stateRoot() };
       default: throw new Error(`unknown method ${method}`);
     }
