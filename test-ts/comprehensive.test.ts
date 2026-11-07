@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert";
 import * as fs from "node:fs";
+import { createHash } from "node:crypto";
 import { Chain } from "../core-ts/chain.js";
-import { MeshNode } from "../core-ts/mesh.js";
+import { MeshNode, makePacket } from "../core-ts/mesh.js";
+import { sneakerExport, sneakerImport } from "../core-ts/sneaker.js";
 import { Wal, walPaths } from "../core-ts/wal.js";
 import { Ledger } from "../core-ts/ledger.js";
 import { Governance } from "../core-ts/governance.js";
@@ -55,7 +57,7 @@ test("comprehensive: metrics endpoint shape", async () => {
     assert.match(txt, /aegis_supply/);
     const h = await fetch(`http://127.0.0.1:${port}/health`);
     const hj = await h.json();
-    assert.equal(hj.version, "1.7.0");
+    assert.equal(hj.version, "1.8.0");
   } finally { server.close(); }
 });
 
@@ -137,11 +139,26 @@ test("comprehensive: slash reduces stake, mesh queue persistence", () => {
   const cut = chain.ledger.slash(a.address, 1000n);
   assert.equal(cut, 100_000_000_000n);
   assert.equal(chain.ledger.get(a.address).stake, 900_000_000_000n);
-  // mesh queue roundtrip
+  // mesh queue roundtrip (real offline tx via signOffline)
   const node = new MeshNode("test-node", hybridGenerate(randomBytes(32)));
-  node.queueForCarry({ type: "AEGIS_PACKET", v: "0.4", tx: {} as any, txHash: "h", nullifier: "n", hops: 0, ttl: 8, priority: "normal", origin: node.addr, createdAt: Date.now(), transport: "QR" } as any);
+  const tx = node.signOffline("aeg1bob", 100_000n, "test sale", "shop.aegis.local", Buffer.alloc(16, 1));
+  node.queueForCarry(makePacket(tx));
   node.saveQueue("/tmp/aegis-mesh-queue.json");
   const n = new MeshNode("test-node2", hybridGenerate(randomBytes(32)));
   const loaded = n.loadQueue("/tmp/aegis-mesh-queue.json");
   assert.equal(loaded, 1);
+  // sneaker export/import (file transport)
+  const exported = sneakerExport(node, "/tmp/aegis-sneaker.json");
+  assert.equal(exported, 1);
+  const accepted = sneakerImport("/tmp/aegis-sneaker.json", { [n.nodeId]: n });
+  assert.ok(accepted >= 0);
+});
+
+test("comprehensive: ml hash commitment roundtrip", () => {
+  const kp = hybridGenerate(randomBytes(32));
+  const h = createHash("sha256").update(kp.mlPublicKey).digest("hex");
+  assert.equal(h.length, 64);
+  const chain = new Chain();
+  chain.ledger.get(kp.address).mlPublicHash = h;
+  assert.equal(chain.ledger.get(kp.address).mlPublicHash, h);
 });

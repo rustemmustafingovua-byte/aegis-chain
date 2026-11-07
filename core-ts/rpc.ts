@@ -5,6 +5,7 @@
  * v1.1: + aeg_faucet (devnet), aeg_registerValidator, aeg_metrics / /metrics, libp2p gossip
  */
 import * as http from "node:http";
+import { createHash } from "node:crypto";
 import { Chain } from "./chain.js";
 import { stringify, parseTx } from "./ledger.js";
 import { MeshNode } from "./mesh.js";
@@ -24,7 +25,7 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
     res.setHeader("Access-Control-Allow-Headers", "content-type");
     if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
 
-    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.7.0" })); }
+    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.8.0" })); }
     if (req.url === "/metrics") {
       res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4" });
       const lines = [
@@ -195,6 +196,21 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
         // v1.6: checkpoint = snapshot + prune to 100 + WAL compact (single call)
         chain.prune(100);
         return { checkpoint: chain.snapshot(), prunedHeight: chain.prunedHeight };
+      }
+      case "aeg_commitMlKey": {
+        // v1.8: PQ hash commitment — store mlPublicHash for account (full 1952B key off-chain, hash on-chain)
+        const [addr, mlHash, mlPublicKeyB64] = params as [string, string, string?];
+        if (!addr || !addr.startsWith("aeg1")) throw new Error("bad address");
+        if (!mlHash || mlHash.length !== 64) throw new Error("bad mlHash (sha256 hex)");
+        const acct = chain.ledger.get(addr);
+        if (mlPublicKeyB64) {
+          const pub = Buffer.from(mlPublicKeyB64, "base64");
+          if (pub.length !== 1952) throw new Error("ml pub must be 1952B");
+          const h = createHash("sha256").update(pub).digest("hex");
+          if (h !== mlHash) throw new Error("hash mismatch");
+        }
+        acct.mlPublicHash = mlHash;
+        return { committed: addr, mlPublicHash: mlHash };
       }
       case "aeg_prune": return { prunedHeight: chain.prune(Number(params[0] ?? 100)) };
       case "aeg_sync": return { height: chain.height, blocks: chain.blocks.length, stateRoot: chain.ledger.stateRoot() };

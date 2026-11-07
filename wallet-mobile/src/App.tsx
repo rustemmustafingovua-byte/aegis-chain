@@ -245,7 +245,7 @@ export default function App() {
   return (
     <div className="app">
       <div className="hero">
-        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.7</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span></div>
+        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.8</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span></div>
         <h1>Щит Афины.<br />Ключи — в железе, намерение — на экране.</h1>
         <p>Hybrid Ed25519 + ML-DSA-65 · Intent-Bound · Offline Mesh. Агент не подпишет за тебя: нужны Passkey + живой человек + домен.</p>
       </div>
