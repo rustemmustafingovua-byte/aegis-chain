@@ -4,6 +4,8 @@ import * as fs from "node:fs";
 import { createHash } from "node:crypto";
 import { Chain } from "../core-ts/chain.js";
 import { MeshNode, makePacket } from "../core-ts/mesh.js";
+import { encryptIntent, decryptIntent, toConfIntent, fromConfIntent, isConfIntent } from "../core-ts/confidential.js";
+import { loraChunk, loraReassemble } from "../core-ts/lora.js";
 import { sneakerExport, sneakerImport } from "../core-ts/sneaker.js";
 import { Wal, walPaths } from "../core-ts/wal.js";
 import { Ledger } from "../core-ts/ledger.js";
@@ -57,7 +59,7 @@ test("comprehensive: metrics endpoint shape", async () => {
     assert.match(txt, /aegis_supply/);
     const h = await fetch(`http://127.0.0.1:${port}/health`);
     const hj = await h.json();
-    assert.equal(hj.version, "1.8.0");
+    assert.equal(hj.version, "1.9.0");
   } finally { server.close(); }
 });
 
@@ -161,4 +163,15 @@ test("comprehensive: ml hash commitment roundtrip", () => {
   const chain = new Chain();
   chain.ledger.get(kp.address).mlPublicHash = h;
   assert.equal(chain.ledger.get(kp.address).mlPublicHash, h);
+});
+
+test("comprehensive: confidential intent + lora chunk roundtrip", () => {
+  const wire = toConfIntent("продажа велика #1", "shared-secret-42");
+  assert.equal(isConfIntent(wire), true);
+  assert.equal(fromConfIntent(wire, "shared-secret-42"), "продажа велика #1");
+  assert.throws(() => fromConfIntent(wire, "wrong-secret"));
+  const json = JSON.stringify({ hello: "lora world", payload: "x".repeat(200) });
+  const frames = loraChunk(json, 51);
+  assert.ok(frames.length >= 2);
+  assert.equal(loraReassemble(frames), json);
 });

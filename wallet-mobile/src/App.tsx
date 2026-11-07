@@ -4,6 +4,7 @@ import { createPasskey, authPasskey, encryptKeys, decryptKeys, localEntropy } fr
 import { hybridGenerate, signIntent, offlinePacket, behavioralScore } from "./lib/aegis-wallet";
 import { splitSecret, recoverSecret, backupJson, parseBackup, secretFingerprint } from "./lib/shamir";
 import { bleSupported, bleScanAndRead } from "./lib/ble";
+import { toConfIntent } from "./lib/confidential";
 
 type Stored = { iv: string; ct: string; credentialId: string; address: string };
 type TxItem = { hash: string; to: string; amount: string; intent: string; verdict: string; score: number; ts: number };
@@ -26,6 +27,8 @@ export default function App() {
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("10");
   const [intent, setIntent] = useState("");
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [privateSecret, setPrivateSecret] = useState("");
   const [domain, setDomain] = useState("marketplace.aegis.local");
   const [signedTx, setSignedTx] = useState<any>(null);
   const [meshPacket, setMeshPacket] = useState("");
@@ -128,7 +131,12 @@ export default function App() {
     if (!to || !amount) return setStatus("Укажи получателя и сумму");
     tap();
     const ent = await localEntropy();
-    const tx = signIntent(keys, { from: keys.address, to, amount, intent: intent || "платёж", domain: domain || "aegis.local", expiry: Math.floor(Date.now() / 1000) + 120 }, ent);
+    let intentVal = intent || "платёж";
+    if (isPrivate) {
+      if (!privateSecret) return setStatus("Укажи shared secret для private intent");
+      intentVal = await toConfIntent(intentVal, privateSecret);
+    }
+    const tx = signIntent(keys, { from: keys.address, to, amount, intent: intentVal, domain: domain || "aegis.local", expiry: Math.floor(Date.now() / 1000) + 120 }, ent);
     const confirmMs = Date.now() - firstTapRef.current;
     const behav = behavioralScore(intervalsRef.current, confirmMs, tx.humanContextHash);
     setSignedTx({ tx, behav });
@@ -245,7 +253,7 @@ export default function App() {
   return (
     <div className="app">
       <div className="hero">
-        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.8</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span></div>
+        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.9</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span></div>
         <h1>Щит Афины.<br />Ключи — в железе, намерение — на экране.</h1>
         <p>Hybrid Ed25519 + ML-DSA-65 · Intent-Bound · Offline Mesh. Агент не подпишет за тебя: нужны Passkey + живой человек + домен.</p>
       </div>
@@ -291,6 +299,8 @@ export default function App() {
           <button className="secondary" style={{ width: "auto" }} onClick={onBleScan}>📡 BLE</button></div>
           <label>Сумма (base units, 6 decimals)</label><input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1000000" />
           <label>Зачем (intent — видно человеку и сети)</label><input value={intent} onChange={(e) => setIntent(e.target.value)} placeholder="продажа велосипеда #4721" />
+          <label><input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} style={{ width: "auto" }} /> private intent (шифр, сеть видит только cipher)</label>
+          {isPrivate && <><label>Shared secret (out-of-band, QR)</label><input value={privateSecret} onChange={(e) => setPrivateSecret(e.target.value)} placeholder="shared-secret" /></>}
           <label>Домен (domain binding — фишинг уже не сработает)</label><input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="marketplace.aegis.local" />
           <div className="grid" style={{ marginTop: 8 }}>
             <button className="btn" onClick={onSignOnline}>Подписать онлайн (Passkey + Liveness)</button>

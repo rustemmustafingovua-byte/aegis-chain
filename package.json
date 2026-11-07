@@ -1,6 +1,6 @@
 {
   "name": "aegis-chain",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "AEGIS — post-quantum hybrid chain with anti-AI shield, offline mesh autonomy, P2P network, RPC, explorer, keeper and Passkey wallet",
   "type": "module",
   "license": "MIT",
