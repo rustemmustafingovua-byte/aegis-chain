@@ -148,6 +148,10 @@ footer{color:var(--mut);font-size:13px;margin-top:18px}
       <h3>💱 Swap AEGIS ↔ USDC — AMM x·y=k, 0.30%</h3>
       <div class="row"><span>Pool: <b id="poolInfo">…</b></span><span>Price: <b id="poolPrice">…</b></span><span id="poolDepth"></span></div>
       <div class="hr"></div>
+      <h3 style="margin-top:6px">Price chart (live)</h3>
+      <svg id="priceChart" width="100%" height="60" style="background:var(--bg2);border-radius:8px;border:1px solid var(--line)"></svg>
+      <div class="hint" id="priceMeta" style="margin-top:4px">—</div>
+      <div class="hr"></div>
       <div style="display:grid;gap:8px">
         <label class="hint">amount in (base units, 6 decimals)</label>
         <input id="swapIn" value="1000000"/>
@@ -186,9 +190,9 @@ footer{color:var(--mut);font-size:13px;margin-top:18px}
       <div style="display:grid;gap:8px">
         <input id="newId" placeholder="id"/>
         <input id="newTitle" placeholder="title"/>
-        <input id="newAction" placeholder="action"/>
+        <input id="newAction" placeholder="action (fee:30 / mint:addr:amount / noop)"/>
         <input id="newProposer" placeholder="proposer aeg1…"/>
-        <button onclick="govCreate()">create</button>
+        <div class="row"><button onclick="govCreate()">create</button><button class="secondary" onclick="govExec()">execute passed</button></div>
         <span id="govCreateOut" class="mono"></span>
       </div>
     </div>
@@ -234,7 +238,7 @@ footer{color:var(--mut);font-size:13px;margin-top:18px}
 </div></div>
 
 <script>
-let state=null, auto=true, lastBlocks=new Set(), memHist=[];
+let state=null, auto=true, lastBlocks=new Set(), memHist=[], priceHist=[];
 function toast(t){const el=document.getElementById('toast');el.textContent=t;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>el.style.display='none',2200)}
 function switchTab(t){
   for(const id of ['blocks','swap','stake','gov','bridge','node']){
@@ -249,6 +253,15 @@ async function rpc(method, params=[]){
 }
 function spark(){
   const h=document.getElementById('spark'); h.innerHTML=memHist.slice(-24).map(n=>`<i style="height:${Math.max(3,Math.min(34,3+n*3))}px"></i>`).join('');
+  // price chart SVG line
+  const svg=document.getElementById('priceChart');
+  if(svg && priceHist.length>2){
+    const w=svg.clientWidth||600, H=60, vals=priceHist.slice(-40);
+    const min=Math.min(...vals), max=Math.max(...vals), rng=(max-min)||1;
+    const pts=vals.map((v,i)=>`${(i/(vals.length-1)*w).toFixed(1)},${(H-4-((v-min)/rng)*(H-8)).toFixed(1)}`).join(' ');
+    svg.innerHTML=`<polyline points="${pts}" fill="none" stroke="#38e1ff" stroke-width="2"/>`;
+    document.getElementById('priceMeta').textContent=`min ${min.toFixed(4)} · last ${vals[vals.length-1].toFixed(4)} · max ${max.toFixed(4)} · n=${vals.length}`;
+  }
 }
 async function refresh(){
   if(!auto) return;
@@ -275,6 +288,7 @@ async function refresh(){
     document.getElementById('poolInfo').textContent=pool? `${pool.key}`:'no pool';
     document.getElementById('poolPrice').textContent=pool? (pool.price||''):'';
     document.getElementById('kPrice').textContent=pool? pool.price:'—';
+    if(pool && pool.price){ const p=parseFloat(pool.price); if(!isNaN(p)) priceHist.push(p); spark(); }
     document.getElementById('poolDepth').innerHTML=pool? `<span class="chip">base ${pool.base} · quote ${pool.quote} · fee 30bps · shares ${pool.totalShares}</span>`:'';
     let total=0n; for(const a of state.accounts) total+=BigInt(a.stake);
     document.getElementById('totalStake').textContent=total.toString();
@@ -311,6 +325,13 @@ async function govVote(support){
 async function govCreate(){
   const j=await rpc('aeg_govPropose',[document.getElementById('newId').value.trim(), document.getElementById('newTitle').value.trim(), document.getElementById('newAction').value.trim(), document.getElementById('newProposer').value.trim()]);
   document.getElementById('govCreateOut').textContent=j.result? 'created '+j.result.created : ('err: '+j.error?.message);
+  refresh();
+}
+async function govExec(){
+  const id=document.getElementById('newId').value.trim()||document.getElementById('govId').value.trim();
+  if(!id) return;
+  const j=await rpc('aeg_govExecute',[id]);
+  document.getElementById('govCreateOut').textContent=j.result? 'executed: '+j.result.applied : ('err: '+j.error?.message);
   refresh();
 }
 async function snap(){

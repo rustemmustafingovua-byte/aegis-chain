@@ -41,4 +41,31 @@ export class Governance {
     else if (p.votesAgainst >= threshold) p.status = "failed";
     return p;
   }
+  /** v1.5: executable proposals — passed action mutates chain (fee change, treasury mint). */
+  executed = new Set<string>();
+  execute(proposalId: string): { applied: string } {
+    const p = this.proposals.get(proposalId);
+    if (!p || p.status !== "passed") throw new Error("not passed");
+    if (this.executed.has(proposalId)) return { applied: "already executed" };
+    const action = p.action.trim().toLowerCase();
+    if (action.startsWith("fee:")) {
+      const bps = BigInt(action.slice(4));
+      if (bps < 0n || bps > 1000n) throw new Error("fee bounds 0..1000bps");
+      for (const pool of this.chain.ledger.pools.values()) pool.feeBps = bps;
+      this.executed.add(proposalId);
+      return { applied: `feeBps ${bps}` };
+    }
+    if (action.startsWith("mint:")) {
+      const [, addr, amt] = p.action.split(":");
+      if (!addr || !amt) throw new Error("bad mint action");
+      this.chain.ledger.fund(addr, BigInt(amt));
+      this.executed.add(proposalId);
+      return { applied: `mint ${amt} -> ${addr}` };
+    }
+    if (action.startsWith("noop") || action.trim() === "") {
+      this.executed.add(proposalId);
+      return { applied: "noop" };
+    }
+    throw new Error("unknown action");
+  }
 }

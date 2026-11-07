@@ -29,11 +29,11 @@ python3 demo.py        # демо: нормальный юзер проходи�
 python3 -m pytest test_aegis.py -v   # тесты
 ```
 
-### v1.3 TypeScript Chain (как Lumen) + ML-DSA + Mesh + Infra + Дизайн
+### v1.5 TypeScript Chain (как Lumen) + ML-DSA + Mesh + Infra + Дизайн
 ```bash
 cd ~/workspace/workspace/aegis-chain
 npm install
-npm test               # 42 passing + finality/halving: hybrid, Chain, Shamir, Mesh, P2P, RPC, AMM, Governance, Bridge, security (size guards, domain binding, liveness, replay) + 16 forge tests (AMM CEI/slippage, vault bounds, mint cap, conservation)
+npm test               # 43 passing + finality/halving: hybrid, Chain, Shamir, Mesh, P2P, RPC, AMM, Governance, Bridge, security (size guards, domain binding, liveness, replay) + 22 forge tests (AMM CEI/slippage, vault bounds, mint cap, conservation)
 npm run demo           # Ed25519+ML-DSA-65, intent, offline mesh, PoS block
 npm run build          # tsc → dist/
 npm run serve          # :8899 RPC+Explorer v1.0, :3899 TCP + :4899 libp2p Noise (живой узел)

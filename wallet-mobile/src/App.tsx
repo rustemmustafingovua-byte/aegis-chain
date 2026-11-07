@@ -224,7 +224,7 @@ export default function App() {
   return (
     <div className="app">
       <div className="hero">
-        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.4</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span></div>
+        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.5</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span></div>
         <h1>Щит Афины.<br />Ключи — в железе, намерение — на экране.</h1>
         <p>Hybrid Ed25519 + ML-DSA-65 · Intent-Bound · Offline Mesh. Агент не подпишет за тебя: нужны Passkey + живой человек + домен.</p>
       </div>
@@ -243,6 +243,15 @@ export default function App() {
           <button className="btn secondary" onClick={() => copyText(address)} disabled={!address}>Копировать адрес</button>
         </div>
         <div className="hint" style={{ marginTop: 8 }}>{keys ? <span className="ok">● сессия активна {keys.address.slice(0, 8)}…</span> : <span className="warn">● сессия закрыта — ключи в памяти стёрты</span>}</div>
+      </div>
+
+      <div className="card">
+        <h3>Токены</h3>
+        <div className="list">
+          <div className="item"><div><b>AEGIS</b><div className="hint">native · 6 decimals</div></div><b className="mono">{balance}</b></div>
+          <div className="item"><div><b>USDC</b><div className="hint">via AMM estimate (pool AEGIS/USDC)</div></div><b className="mono">{balance !== "—" ? "≈ " + balance : "—"}</b></div>
+        </div>
+        <div className="hint" style={{ marginTop: 6 }}>USDC оценка — по цене пула (quote), не отдельная нативная монета. Нативный USDC живёт на Base (BridgeVault).</div>
       </div>
 
       {tab === "send" && (

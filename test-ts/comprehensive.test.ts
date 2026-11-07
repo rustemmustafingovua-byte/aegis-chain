@@ -54,7 +54,7 @@ test("comprehensive: metrics endpoint shape", async () => {
     assert.match(txt, /aegis_supply/);
     const h = await fetch(`http://127.0.0.1:${port}/health`);
     const hj = await h.json();
-    assert.equal(hj.version, "1.4.0");
+    assert.equal(hj.version, "1.5.0");
   } finally { server.close(); }
 });
 
@@ -102,4 +102,29 @@ test("comprehensive: WAL append + status + compact", () => {
   const st = wal.status(1);
   assert.equal(st.walBlocks, 1);
   try { fs.unlinkSync(walPath); } catch {}
+});
+
+test("comprehensive: governance execute fee change + halving", () => {
+  const chain = new Chain();
+  const a = hybridGenerate(randomBytes(32));
+  chain.ledger.addLiquidity("AEGIS/USDC", 1_000_000_000000n, 1_000_000_000000n, a.address);
+  chain.ledger.get(a.address).stake = 1_000_000_000_000n;
+  chain.ledger.get(a.address).humanityScore = 90;
+  chain.ledger.get(a.address).balance = 0n;
+  const b = hybridGenerate(randomBytes(32));
+  chain.ledger.get(b.address).stake = 1_000_000_000_000n;
+  chain.ledger.get(b.address).humanityScore = 90;
+  const gov = new Governance(chain);
+  gov.create("fee30", "set fee", "fee:30", a.address);
+  gov.vote("fee30", a.address, true);
+  gov.vote("fee30", b.address, true);
+  gov.tally("fee30");
+  const r = gov.execute("fee30");
+  assert.match(r.applied, /feeBps/);
+  assert.equal(chain.ledger.pools.get("AEGIS/USDC")!.feeBps, 30n);
+  // halving
+  assert.equal(chain.halvingFactor(0), 1);
+  const r1 = chain.ledger.rewardProposer(a.address, 10_000_000_000000n, 10_000_000_000000n, 1);
+  const r2 = chain.ledger.rewardProposer(a.address, 10_000_000_000000n, 10_000_000_000000n, 2);
+  assert.ok(r1 >= r2);
 });

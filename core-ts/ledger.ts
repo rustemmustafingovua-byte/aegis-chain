@@ -180,14 +180,15 @@ export class Ledger {
   /**
    * v0.7: block proposer reward — 3% APR pro-rata to stake (Lumen economics).
    * Called by Chain.accept() after block applied.
+   * v1.5: halving-aware — reward ÷ halvingFactor (4-year halving math).
    */
-  rewardProposer(proposerAddr: string, stake: bigint, totalStake: bigint): bigint {
+  rewardProposer(proposerAddr: string, stake: bigint, totalStake: bigint, halvingFactor = 1): bigint {
     if (totalStake === 0n || stake === 0n) return 0n;
     // per-block reward = (3% APR / blocks_per_year) * stake pro-rata? simplified:
     // reward = (stake * REWARD_APR_BPS / 10000) * (1 / BLOCKS_PER_YEAR) — floor
     // For demo chain with small stakes this is dust, so min floor 1n if stake>0? Keep exact math.
     const yearly = (stake * REWARD_APR_BPS) / 10_000n;
-    const perBlock = yearly / BLOCKS_PER_YEAR;
+    const perBlock = yearly / BLOCKS_PER_YEAR / BigInt(halvingFactor);
     if (perBlock > 0n) {
       this.get(proposerAddr).balance += perBlock;
       return perBlock;

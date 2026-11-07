@@ -24,7 +24,7 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
     res.setHeader("Access-Control-Allow-Headers", "content-type");
     if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
 
-    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.4.0" })); }
+    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.5.0" })); }
     if (req.url === "/metrics") {
       res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4" });
       const lines = [
@@ -138,6 +138,10 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
       case "aeg_govList": {
         if (!deps.gov) return [];
         return [...deps.gov.proposals.values()].map((p) => JSON.parse(stringify(p)));
+      }
+      case "aeg_govExecute": {
+        if (!deps.gov) throw new Error("governance not attached");
+        return deps.gov.execute(params[0] as string);
       }
       case "aeg_bridgeQuote": {
         const [usdcIn, ammBase, ammQuote] = [params[0], params[1], params[2]];
