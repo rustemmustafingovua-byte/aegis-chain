@@ -9,7 +9,8 @@ __pycache__/
 out/
 cache/
 broadcast/
-lib/
+/lib/
+!wallet-mobile/src/lib/
 wallet-mobile/node_modules/
 wallet-mobile/dist/
 deployments/*.json
