@@ -19,13 +19,28 @@ type RpcResponse = { jsonrpc: "2.0"; id: number | string; result?: unknown; erro
 
 export type RpcDeps = { gov?: Governance; bridge?: Bridge; p2p?: P2pNode; libp2p?: Libp2pNode };
 
+const ADMIN_METHODS = new Set(["aeg_faucet", "aeg_slash", "aeg_registerValidator", "aeg_commitMlKey", "aeg_prune", "aeg_checkpoint"]);
+
 export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {}) {
+  // per-IP token bucket rate limit (100 req/s default, env AEGIS_RPC_RATE_LIMIT)
+  const rateWindow = new Map<string, { count: number; ts: number }>();
+  const RATE_LIMIT = Number(process.env.AEGIS_RPC_RATE_LIMIT ?? 100);
   const server = http.createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "content-type");
+    res.setHeader("Access-Control-Allow-Headers", "content-type, x-admin-token");
     if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
 
-    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.9.0" })); }
+    // rate limit
+    const ip = (req.socket.remoteAddress ?? "unknown").split(",")[0].trim();
+    const nowSec = Math.floor(Date.now() / 1000);
+    const slot = rateWindow.get(ip) ?? { count: 0, ts: nowSec };
+    if (slot.ts !== nowSec) rateWindow.set(ip, { count: 1, ts: nowSec });
+    else if (++slot.count > RATE_LIMIT) {
+      res.writeHead(429, { "Retry-After": String(60 - (Date.now() % 60_000) / 1000), "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32002, message: "rate limit exceeded" } }));
+    }
+
+    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.10.0" })); }
     if (req.url === "/metrics") {
       res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4" });
       const lines = [
@@ -79,6 +94,11 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
         const reqJson = JSON.parse(body) as RpcRequest;
         if (!reqJson.method || typeof reqJson.method !== "string") throw new Error("bad method");
         if (!Array.isArray(reqJson.params)) throw new Error("bad params");
+        const adminTok = (req.headers["x-admin-token"] as string) ?? "";
+        const expected = process.env.AEGIS_ADMIN_TOKEN ?? "";
+        if (ADMIN_METHODS.has(reqJson.method) && expected && adminTok !== expected) {
+          throw new Error("admin token required (AEGIS_ADMIN_TOKEN)");
+        }
         const result = dispatch(reqJson.method, reqJson.params || []);
         const resp: RpcResponse = { jsonrpc: "2.0", id: reqJson.id, result };
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -98,7 +118,15 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
         const b = chain.blocks.find((x) => x.header.height === h);
         return b ? JSON.parse(stringify(b)) : null;
       }
-      case "aeg_getBlocks": return chain.blocks.slice(-(params[0] ?? 20)).map((b) => ({ height: b.header.height, hash: b.hash, txCount: b.header.txCount }));
+      case "aeg_getBlocks": {
+        // backward compat: [limit] = last N; [offset, limit] = paginated window
+        if (params.length >= 2) {
+          const offset = Number(params[0] ?? 0);
+          const limit = Math.min(Number(params[1] ?? 20), 100);
+          return chain.blocks.slice(offset, offset + limit).map((b) => ({ height: b.header.height, hash: b.hash, txCount: b.header.txCount }));
+        }
+        return chain.blocks.slice(-(Number(params[0] ?? 20))).map((b) => ({ height: b.header.height, hash: b.hash, txCount: b.header.txCount }));
+      }
       case "aeg_getBalance": return chain.ledger.balance(params[0] as string).toString();
       case "aeg_getAccount": {
         const a = chain.ledger.accounts.get(params[0] as string);

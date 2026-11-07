@@ -24,7 +24,7 @@ test("security: hybrid size guards reject truncated sigs without throwing", () =
 test("security: domain binding — sig for market A fails on market B", () => {
   const kp = hybridGenerate(randomBytes(32));
   const ent = randomBytes(16);
-  const signed = signIntent(kp, { from: kp.address, to: "aeg1bob", amount: "100", intent: "sale", domain: "market.aegis.local", expiry: Math.floor(Date.now()/1000)+300 }, ent, "genesis");
+  const signed = signIntent(kp, { from: kp.address, to: "aeg1bob", amount: 100n, intent: "sale", domain: "market.aegis.local", expiry: Math.floor(Date.now()/1000)+300 }, ent, "genesis");
   const ok = verifyIntent(kp.edPublic, kp.mlPublicKey, signed);
   assert.equal(ok.ok, true);
   const tampered = { ...signed, domain: "evil.com" };
@@ -39,7 +39,7 @@ test("security: domain binding — sig for market A fails on market B", () => {
 test("security: liveness response tamper fails verifyIntent", () => {
   const kp = hybridGenerate(randomBytes(32));
   const ent = randomBytes(16);
-  const signed = signIntent(kp, { from: kp.address, to: "aeg1bob", amount: "100", intent: "sale", domain: "market.aegis.local", expiry: Math.floor(Date.now()/1000)+300 }, ent, "genesis");
+  const signed = signIntent(kp, { from: kp.address, to: "aeg1bob", amount: 100n, intent: "sale", domain: "market.aegis.local", expiry: Math.floor(Date.now()/1000)+300 }, ent, "genesis");
   const bad = { ...signed, livenessResponse: { ...signed.livenessResponse, hybrid: "0".repeat(64) } };
   const v = verifyIntent(kp.edPublic, kp.mlPublicKey, bad);
   assert.equal(v.ok, false);

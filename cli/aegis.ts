@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * AEGIS CLI — wallet new / send / mesh / demo
+ * AEGIS CLI — wallet new / send / mesh / demo / bench
  */
 import { createHash, randomBytes } from "node:crypto";
 import { hybridGenerate, hybridSign } from "../core-ts/hybrid.js";
@@ -78,7 +78,8 @@ async function main() {
   if (cmd === "demo") await demo();
   else if (cmd === "wallet" && process.argv[3] === "new") walletNew();
   else if (cmd === "mesh") await demo();
+  else if (cmd === "bench") { const { runBench } = await import("./bench.js"); await runBench(); }
   else if (cmd === "serve" || cmd === "node" || cmd === "explorer") await serveCmd(process.argv[3]);
-  else console.log("Usage: tsx cli/aegis.ts [demo|mesh|serve|node|explorer|wallet new]");
+  else console.log("Usage: tsx cli/aegis.ts [demo|mesh|serve|node|explorer|bench|wallet new]");
 }
 main();
