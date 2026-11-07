@@ -12,6 +12,8 @@ import { Ledger } from "../core-ts/ledger.js";
 import { Governance } from "../core-ts/governance.js";
 import { Bridge } from "../core-ts/bridge.js";
 import { createRpcServer } from "../core-ts/rpc.js";
+import { readFileSync } from "node:fs";
+import { VERSION } from "../core-ts/version.js";
 import { hybridGenerate } from "../core-ts/hybrid.js";
 import { randomBytes } from "node:crypto";
 
@@ -59,7 +61,9 @@ test("comprehensive: metrics endpoint shape", async () => {
     assert.match(txt, /aegis_supply/);
     const h = await fetch(`http://127.0.0.1:${port}/health`);
     const hj = await h.json();
-    assert.equal(hj.version, "1.11.0");
+    assert.equal(hj.version, VERSION);
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    assert.equal(pkg.version, VERSION, "package.json version must match core-ts/version.ts");
   } finally { server.close(); }
 });
 

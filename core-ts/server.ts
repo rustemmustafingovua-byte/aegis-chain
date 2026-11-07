@@ -21,6 +21,7 @@ import { Bridge } from "./bridge.js";
 import { Discovery, BOOTSTRAP } from "./discovery.js";
 import { hybridGenerate, type HybridKeypair } from "./hybrid.js";
 import { MeshNode } from "./mesh.js";
+import { PasskeyRegistry } from "./webauthn.js";
 
 export type ServeOpts = {
   port?: number;
@@ -62,11 +63,17 @@ export async function serveNode(port = loadConfig().port, p2pPort = loadConfig()
   }
   gov = new Governance(chain);
   const bridge = new Bridge();
+  // v1.12: passkey bindings live next to the chain snapshot
+  const passkeyFile = stateFile.replace(/\.json$/, "-passkeys.json");
+  let passkeys = new PasskeyRegistry();
+  try {
+    if (fs.existsSync(passkeyFile)) passkeys = PasskeyRegistry.fromJSON(JSON.parse(fs.readFileSync(passkeyFile, "utf8")));
+  } catch (e: any) { logger.warn("passkey registry load failed", { error: e.message }); }
   const discovery = new Discovery();
   for (const b of BOOTSTRAP) discovery.add(b);
   // mesh node bound to validator (offline settlement endpoint)
   const mesh = validator ? new MeshNode(`aegis-node-${port}`, validator) : undefined;
-  const deps: { gov: Governance; bridge: Bridge; p2p?: any } = { gov, bridge };
+  const deps: { gov: Governance; bridge: Bridge; p2p?: any; passkeys: PasskeyRegistry } = { gov, bridge, passkeys };
   const rpc = createRpcServer(chain, mesh, deps);
   // static explorer + RPC proxy in one HTTP server
   const here = (import.meta as any).dirname ?? path.dirname(fileURLToPath(import.meta.url));
@@ -113,7 +120,8 @@ export async function serveNode(port = loadConfig().port, p2pPort = loadConfig()
             const block = chain.produceNextBlock(validator, slot);
             p2p.gossipBlock(block);
             libp2pNode.gossipBlock(block);
-            logger.info("produced", { height: block.header.height, txs: block.header.txCount });
+            logger.info("produced", { height: block.header.height, txs: block.header.txCount, baseFee: chain.feeMarket.baseFee.toString() });
+            try { fs.writeFileSync(passkeyFile, JSON.stringify(passkeys.toJSON())); } catch { /* best effort */ }
             // WAL append (durable) + snapshot every WAL_SNAPSHOT_EVERY blocks
             try {
               const { walPath, snapshotPath } = walPaths(stateFile);

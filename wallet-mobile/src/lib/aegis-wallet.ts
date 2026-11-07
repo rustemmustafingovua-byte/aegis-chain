@@ -6,7 +6,6 @@ import { ml_dsa65 } from "@noble/post-quantum/ml-dsa.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { hexToBytes, bytesToHex } from "@noble/hashes/utils.js";
 import * as ed from "@noble/ed25519";
-import { createHash } from "node:crypto"; // fallback in browser — replaced by subtle
 
 function sha256Hex(s: string): string {
   // sync via simple hash for demo (in prod: noble sha256)
@@ -102,4 +101,17 @@ export function behavioralScore(intervals: number[], confirmMs: number, hch: str
   if (confirmMs < 800) { score-=30; flags.push("too fast"); } else if (confirmMs > 3000) { score+=15; flags.push("thoughtful"); }
   score = Math.max(0, Math.min(100, score));
   return { score, verdict: score < 40 ? "blocked" : score < 70 ? "review" : "allow", flags, mean: Math.round(mean), std: Math.round(std) };
+}
+
+/**
+ * v1.12: canonical ledger tx message (must byte-match core-ts/ledger.ts txMessage).
+ * Signing this — not the human intent string — is what the chain verifies.
+ */
+export function ledgerTxMessage(tx: {
+  from: string; to?: string; amount: string; fee: string; nonce: number;
+  intent: string; domain: string; timestamp: number; data?: string;
+}): string {
+  const base = [tx.from, tx.to ?? "", tx.amount, tx.fee, tx.nonce, tx.intent, tx.domain, tx.timestamp];
+  if (tx.data === undefined) return base.join("|");
+  return [...base, tx.data].join("|");
 }

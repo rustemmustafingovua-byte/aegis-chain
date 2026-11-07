@@ -9,9 +9,12 @@
  *  - Mempool: strict nonce ordering, size caps, tx size limit, fee priority
  */
 import * as fs from "node:fs";
-import { sha256, sha256Buf, verify } from "./crypto.js";
+import { sha256, verify } from "./crypto.js";
 import { Ledger, stringify, parseTx, type Tx } from "./ledger.js";
 import { hybridSign, hybridVerify, type HybridKeypair, type HybridSignature } from "./hybrid.js";
+import { merkleRoot } from "./merkle.js";
+import { FeeMarket } from "./fee.js";
+export { merkleRoot };
 
 export const SLOT_MS = 4000;
 export const MAX_BLOCK_TXS = 500;
@@ -36,20 +39,6 @@ export type Block = {
   hash: string;
 };
 
-export function merkleRoot(leaves: string[]): string {
-  if (leaves.length === 0) return sha256("");
-  let level = leaves.map((l) => sha256Buf(l));
-  while (level.length > 1) {
-    const next: Buffer[] = [];
-    for (let i = 0; i < level.length; i += 2) {
-      const left = level[i];
-      const right = level[i + 1] ?? level[i];
-      next.push(sha256Buf(Buffer.concat([left, right])));
-    }
-    level = next;
-  }
-  return level[0].toString("hex");
-}
 export function blockHash(b: Block): string {
   const h = b.header;
   return sha256([h.height, h.prevHash, h.timestamp, h.proposer, h.merkleRoot, h.txCount, h.slot].join("|"));
@@ -109,6 +98,8 @@ export class Chain {
   /** address → edPublic for reward payout (proposer is edPublic, ledger is address-keyed) */
   edToAddress = new Map<string, string>();
   proposerCounts = new Map<string, number>();
+  /** v1.12: EIP-1559-lite base fee (mempool policy, not consensus). */
+  feeMarket = new FeeMarket();
 
   get height() { return this.prunedHeight + Math.max(0, this.blocks.length - 1); }
   get head(): Block | undefined { return this.blocks[this.blocks.length - 1]; }
@@ -235,6 +226,8 @@ export class Chain {
       this.proposerCounts.set(b.header.proposer, (this.proposerCounts.get(b.header.proposer) ?? 0) + 1);
     }
     this.blocks.push(b);
+    // v1.12: move the base fee based on this block's utilization
+    this.feeMarket.update(b.header.txCount, MAX_BLOCK_TXS, b.header.height);
     return true;
   }
   /** Keep mempool non-empty: take available txs and propose next block. */
@@ -275,6 +268,8 @@ export class Chain {
       ledger: JSON.parse(this.ledger.snapshot()),
       validators: [...this.validators.entries()].map(([pk, v]) => [pk, { ...v, stake: v.stake.toString() }]),
       prunedHeight: this.prunedHeight,
+      feeMarket: this.feeMarket.toJSON(),
+      proposerCounts: [...this.proposerCounts.entries()],
     }, (_k, v) => (typeof v === "bigint" ? v.toString() : v));
   }
   static deserialize(json: string): Chain {
@@ -287,6 +282,8 @@ export class Chain {
       txs: (b.txs ?? []).map((t: any) => parseTx(t)),
     }));
     chain.ledger.restore(JSON.stringify(data.ledger));
+    chain.feeMarket = FeeMarket.fromJSON(data.feeMarket);
+    if (Array.isArray(data.proposerCounts)) chain.proposerCounts = new Map(data.proposerCounts);
     chain.validators = new Map();
     for (const [pk, v] of data.validators ?? []) {
       chain.validators.set(pk, { ...v, stake: BigInt(v.stake) });

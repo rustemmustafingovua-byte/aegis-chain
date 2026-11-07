@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { createPasskey, authPasskey, encryptKeys, decryptKeys, localEntropy } from "./lib/passkey";
-import { hybridGenerate, signIntent, offlinePacket, behavioralScore } from "./lib/aegis-wallet";
+import { createPasskey, authPasskey, encryptKeys, decryptKeys, localEntropy, assertChallenge, sha256Hex } from "./lib/passkey";
+import { hybridGenerate, hybridSign, ledgerTxMessage, signIntent, offlinePacket, behavioralScore } from "./lib/aegis-wallet";
 import { splitSecret, recoverSecret, backupJson, parseBackup, secretFingerprint } from "./lib/shamir";
 import { bleSupported, bleScanAndRead } from "./lib/ble";
 import { toConfIntent } from "./lib/confidential";
 
-type Stored = { iv: string; ct: string; credentialId: string; address: string };
+type Stored = { iv: string; ct: string; credentialId: string; address: string; protection?: "prf" | "device" };
 type TxItem = { hash: string; to: string; amount: string; intent: string; verdict: string; score: number; ts: number };
 
 export default function App() {
@@ -74,7 +74,7 @@ export default function App() {
   async function onCreate() {
     try {
       setStatus("Создание Passkey (Touch ID / Face ID)…");
-      const { unwrapSeed, credentialId } = await createPasskey();
+      const { wrapSecret, credentialId, prf } = await createPasskey();
       const ent = await localEntropy();
       const kp = hybridGenerate();
       const pt = JSON.stringify({
@@ -82,14 +82,16 @@ export default function App() {
         mlSeed: btoa(String.fromCharCode(...kp.mlSeed)),
         address: kp.address,
       });
-      const { iv, ciphertext } = await encryptKeys(unwrapSeed, ent, pt);
-      const entry: Stored = { iv, ct: ciphertext, credentialId, address: kp.address };
+      const { iv, ciphertext } = await encryptKeys(wrapSecret, ent, pt);
+      const entry: Stored = { iv, ct: ciphertext, credentialId, address: kp.address, protection: prf ? "prf" : "device" };
       const next = [...wallets, entry];
       setWallets(next); setActiveIdx(next.length - 1);
       localStorage.setItem("aegis.wallets", JSON.stringify(next));
       localStorage.setItem("aegis.wallet", JSON.stringify(entry));
       setKeys(kp); setAddress(kp.address);
-      setStatus("Кошелёк создан и зашифрован Passkey. Приватный ключ никто не увидит — не извлекай из железа.");
+      setStatus(prf
+        ? "Кошелёк создан. Ключ зашифрован PRF-секретом Passkey — без Touch ID/Face ID не расшифровать."
+        : "Кошелёк создан, но Passkey без PRF: защита только на уровне устройства. Не используй для крупных сумм.");
       showToast("Кошелёк создан");
     } catch (e: any) {
       setStatus(`Passkey create недоступен (${e.message}). Нужен localhost или HTTPS.`);
@@ -100,14 +102,16 @@ export default function App() {
     const s = wallets[activeIdx] ?? null;
     if (!s) return setStatus("Нет сохранённого кошелька");
     try {
-      const { unwrapSeed } = await authPasskey();
+      const { wrapSecret, prf } = await authPasskey(s.credentialId);
       const ent = await localEntropy();
-      const pt = await decryptKeys(unwrapSeed, ent, s.iv, s.ct);
+      const pt = await decryptKeys(wrapSecret, ent, s.iv, s.ct);
       const parsed = JSON.parse(pt);
       const edPrivate = new Uint8Array([...atob(parsed.edPrivate)].map((c) => c.charCodeAt(0)));
       const kp = hybridGenerate(edPrivate);
       setKeys(kp); setAddress(kp.address);
-      setStatus(t("Кошелёк разблокирован через Passkey. Эфемерная сессия — затем ключ стирается из RAM.", "Wallet unlocked via Passkey. Ephemeral session — then key wipes from RAM."));
+      setStatus(prf
+        ? t("Разблокировано через Passkey PRF. Сессия эфемерная — ключ стирается из RAM.", "Unlocked via passkey PRF. Ephemeral session — key wipes from RAM.")
+        : t("Разблокировано. PRF не поддерживается: защита устройства, не железа.", "Unlocked. No PRF: device-level protection only."));
       showToast(t("Разблокировано", "Unlocked"));
       const lockSec = Number(localStorage.getItem("aegis.lockSec") || 60);
       setTimeout(() => setKeys(null), lockSec * 1000);
@@ -190,25 +194,53 @@ export default function App() {
     } catch (e: any) { setStatus(`Восстановление неудалось: ${e.message}`); }
   }
 
-  async function onSendRpc() {
-    if (!signedTx) return setStatus("Сначала подпиши онлайн");
+  async function rpcCall(method: string, params: any[]) {
     const rpc = rpcUrl || localStorage.getItem("aegis.rpc") || "";
-    if (!rpc) return setStatus("Укажи RPC endpoint");
+    if (!rpc) throw new Error("RPC endpoint не задан");
+    const r = await fetch(rpc, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    });
+    return r.json();
+  }
+
+  async function onSendRpc() {
+    if (!keys) return setStatus("Сначала разблокируй кошелёк");
+    if (!to || !amount) return setStatus("Укажи получателя и сумму");
     try {
-      const tx = signedTx.tx;
-      // map wallet intent → ledger Tx (to/amount/fee/nonce/intent/domain)
-      const acct = address;
-      const body = { from: acct, to, amount: BigInt(amount).toString(), fee: "1000", nonce: 0, intent: intent || "платёж", domain: domain || "aegis.local", timestamp: Date.now(), sig: tx.sig, mlPublicKeyB64: Buffer.from(keys.mlPublicKey).toString("base64"), data: "" };
-      // nonce лучше брать с чеыйна
-      const rpc2 = rpc.replace(/\/rpc$/, "");
-      const bal = await fetch(rpc, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "aeg_getAccount", params: [acct] }) }).then(r => r.json());
-      body.nonce = bal.result?.nonce ?? 0;
-      // re-sign over ledger canonical? Wallet hybrid sig is over intent canonical; ledger verifies over txMessage.
-      // For demo devnet: faucet + sendTx pipeline expects hybrid over txMessage; wallet signs intent — чеыйн примет, если mlPub matches.
-      // Тут: просто отправим и покажем ответ (если canApply fails — вердикт сети)
-      const r = await fetch(rpc, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "aeg_sendTx", params: [body] }) });
-      const j = await r.json();
-      setStatus(j.result?.accepted ? `Отправлено в сеть, mempool ${j.result.mempool}` : `Сеть отклонила: ${j.error?.message}`);
+      const acct = await rpcCall("aeg_getAccount", [address]);
+      if (!acct.result) return setStatus("Адрес ещё не в цепи — получи faucet (Shield tab)");
+      const nonce = acct.result.nonce ?? 0;
+      // v1.12: quote the live base fee instead of hardcoding 1000
+      const gas = await rpcCall("aeg_gasPrice", []);
+      const fee = gas.result?.baseFee ?? "1000";
+      // canonical ledger message — exactly what core-ts/ledger.ts verifies
+      const body: any = {
+        from: address, to, amount: BigInt(amount).toString(), fee, nonce,
+        intent: intent || "платёж", domain: domain || "aegis.local",
+        timestamp: Date.now(), data: "",
+      };
+      const msg = ledgerTxMessage(body);
+      const sig = hybridSign(keys, msg);
+      const tx = {
+        ...body, sig,
+        mlPublicKeyB64: btoa(String.fromCharCode(...keys.mlPublicKey)),
+        edPublicB64: btoa(String.fromCharCode(...keys.edPublic)), // first-spend key binding
+      };
+      // If this account has a bound passkey, the server requires an assertion over this exact tx.
+      let assertion: any = undefined;
+      const info = await rpcCall("aeg_passkeyInfo", [address]).catch(() => null);
+      if (info?.result?.length) {
+        const challengeHex = await sha256Hex(msg);
+        assertion = await assertChallenge(challengeHex, info.result[0].credentialId);
+      }
+      const j = await rpcCall("aeg_sendTx", assertion ? [tx, assertion] : [tx]);
+      if (j.result?.accepted) {
+        setStatus(`Отправлено в сеть (fee ${fee}, mempool ${j.result.mempool})`);
+        persistHistory({ hash: sig.hybrid.slice(0, 16), to, amount, intent: intent || "платёж", verdict: "sent", score: 100, ts: Date.now() });
+      } else {
+        setStatus(`Сеть отклонила: ${j.error?.message}`);
+      }
     } catch (e: any) { setStatus(`Отправка неудалась: ${e.message}`); }
   }
 
@@ -256,7 +288,7 @@ export default function App() {
   return (
     <div className="app">
       <div className="hero">
-        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.11</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span>
+        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.12</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span>
           <button className="secondary" style={{ width: "auto", padding: "6px 10px", marginLeft: 6 }} onClick={() => { const nl = lang === "ru" ? "en" : "ru"; setLang(nl); localStorage.setItem("aegis.lang", nl); }}>{lang === "ru" ? "EN" : "RU"}</button></div>
         <h1>Щит Афины.<br />Ключи — в железе, намерение — на экране.</h1>
         <p>Hybrid Ed25519 + ML-DSA-65 · Intent-Bound · Offline Mesh. Агент не подпишет за тебя: нужны Passkey + живой человек + домен.</p>

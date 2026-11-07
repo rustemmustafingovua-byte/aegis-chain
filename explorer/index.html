@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<meta name="description" content="AEGIS Explorer — живой узел v1.11. Постквантовый hybrid-блокчейн, устойчивый к взлому и ИИ-агентам."/>
+<meta name="description" content="AEGIS Explorer — живой узел v1.12. Постквантовый hybrid-блокчейн, устойчивый к взлому и ИИ-агентам."/>
 <meta name="theme-color" content="#0b0e1a"/>
-<title>AEGIS Explorer — живой узел v1.11</title>
+<title>AEGIS Explorer — живой узел v1.12</title>
 <style>
 :root{
   --bg:#0b0e1a; --bg2:#0f132e; --card:#11162e; --card2:#161c3d;
@@ -78,7 +78,7 @@ footer{color:var(--mut);font-size:13px;margin-top:18px}
       <b style="font-size:17px">🛡️ AEGIS <span style="color:var(--cyan)">Explorer</span></b>
       <div class="row">
         <span class="badge" id="height">height …</span>
-        <span class="badge">v1.11</span>
+        <span class="badge">v1.12</span>
         <span class="badge" id="netstat">● live</span>
       </div>
     </div>
@@ -99,6 +99,7 @@ footer{color:var(--mut);font-size:13px;margin-top:18px}
       <div class="kpi"><div class="v" id="kPeers">…</div><div class="k">Peers</div></div>
       <div class="kpi"><div class="v" id="kPrice">…</div><div class="k">AMM price</div></div>
       <div class="kpi"><div class="v" id="kBlockTime">…</div><div class="k">Avg block time</div></div>
+      <div class="kpi"><div class="v" id="kBaseFee">…</div><div class="k">Base fee</div></div>
     </div>
   </div>
 
@@ -107,6 +108,7 @@ footer{color:var(--mut);font-size:13px;margin-top:18px}
       <div><label class="hint">Адрес / хеш</label><input id="addr" placeholder="aeg1… или hash блока"/></div>
       <div style="flex:0 1 auto;display:flex;gap:8px;align-items:end">
         <button class="secondary" onclick="lookup()">баланс</button>
+        <button class="secondary" onclick="proveBalance()">🔐 доказать (light client)</button>
         <button onclick="refresh()">↻</button>
         <button class="secondary" id="autoBtn" onclick="toggleAuto()">⏸ автоповтор</button>
       </div>
@@ -229,7 +231,7 @@ footer{color:var(--mut);font-size:13px;margin-top:18px}
     </div>
   </div>
 
-  <footer>AEGIS v1.11 — постквантовый trust layer. Не финансовая рекомендация. Кошелёк: <span class="mono">wallet-mobile/</span> · Доки: <span class="mono">docs/</span> · Аудит: <span class="mono">SECURITY.md</span></footer>
+  <footer>AEGIS v1.12 — постквантовый trust layer. Не финансовая рекомендация. Кошелёк: <span class="mono">wallet-mobile/</span> · Доки: <span class="mono">docs/</span> · Аудит: <span class="mono">SECURITY.md</span></footer>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -264,6 +266,33 @@ function spark(){
     document.getElementById('priceMeta').textContent=`min ${min.toFixed(4)} · last ${vals[vals.length-1].toFixed(4)} · max ${max.toFixed(4)} · n=${vals.length}`;
   }
 }
+// ---- v1.12: light-client Merkle proof verification (mirrors core-ts/merkle.ts) ----
+function hexToU8(hex){const out=new Uint8Array(hex.length/2);for(let i=0;i<out.length;i++)out[i]=parseInt(hex.slice(i*2,i*2+2),16);return out;}
+function u8ToHex(u8){return [...u8].map(b=>b.toString(16).padStart(2,'0')).join('');}
+function u8cat(a,b){const out=new Uint8Array(a.length+b.length);out.set(a,0);out.set(b,a.length);return out;}
+async function h256(u8){return new Uint8Array(await crypto.subtle.digest('SHA-256',u8));}
+async function verifyStateProof(p){
+  let cur=await h256(u8cat(new Uint8Array([0]), new TextEncoder().encode(p.leaf)));
+  let idx=p.index;
+  for(const sibHex of p.siblings){
+    const sib=hexToU8(sibHex);
+    cur = (idx%2===0) ? await h256(u8cat(new Uint8Array([1]), u8cat(cur,sib)))
+                      : await h256(u8cat(new Uint8Array([1]), u8cat(sib,cur)));
+    idx=Math.floor(idx/2);
+  }
+  return u8ToHex(cur)===p.root;
+}
+async function proveBalance(){
+  const a=document.getElementById('addr').value.trim();
+  if(!a){document.getElementById('bal').textContent='введи адрес';return;}
+  const j=await rpc('aeg_getProof',[a]);
+  if(j.error){document.getElementById('bal').innerHTML=`<span class="warn">нет доказательства: ${j.error.message}</span>`;return;}
+  const p=j.result, ok=await verifyStateProof(p);
+  document.getElementById('bal').innerHTML =
+    `${ok?'<span class="ok">✓ proof verified</span>':'<span class="warn">✗ proof failed</span>'} · leaf <span class="mono">${p.leaf}</span><br>`+
+    `<span class="hint">root ${p.root.slice(0,24)}… · siblings ${p.siblings.length} · height ${p.height} — проверено в браузере, без доверия узлу</span>`;
+}
+
 async function refresh(){
   if(!auto) return;
   try{
@@ -275,6 +304,8 @@ async function refresh(){
     memHist.push(state.mempool); spark();
     document.getElementById('kSupply').textContent=state.supply;
     document.getElementById('kPeers').textContent=(state.peers||[]).length;
+    document.getElementById('kBaseFee').textContent=state.baseFee ?? '—';
+    document.getElementById('kBaseFee').title='suggested max fee: '+(state.suggestedFee ?? '—');
     document.getElementById('head').textContent=state.head? state.head.hash.slice(0,20)+'...' : '—';
     document.getElementById('head').title=state.head?state.head.hash:'';
     document.getElementById('root').textContent=(state.stateRoot||'').slice(0,20)+'…';

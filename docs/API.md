@@ -31,8 +31,18 @@ curl http://127.0.0.1:8899/api/rpc -X POST -H 'Content-Type: application/json' \
 | `aeg_peerList` | `[]` | p2p peers |
 | `aeg_meshStatus` | `[]` | mesh mempool/peers/stats |
 | `aeg_sync` | `[]` | height, blocks, stateRoot |
+| `aeg_gasPrice` | `[]` | baseFee, priorityFee, suggestedMaxFee, median (v1.12) |
+| `aeg_feeHistory` | `[n]` | последние n сэмплов base fee |
+| `aeg_getProof` | `[address]` | Merkle inclusion proof + verified (v1.12) |
+| `aeg_passkeyRegister` | `[address, credId, clientDataJSON, attestationObject, hybridProof, mlPubB64, label?]` | привязка passkey (v1.12) |
+| `aeg_passkeyInfo` | `[address]` | список credential'ов |
+| `aeg_passkeyRevoke` | `[address, credId]` | отвязать credential |
 
-Tx формат (см. `core-ts/ledger.ts` Tx): `from, to?, amount (bigint→string в JSON), fee, nonce, intent (обязательно), domain (обязательно), timestamp, sig{edSig,mlSig,hybrid}, mlPublicKeyB64, nullifier?, data?` (`stake:|unstake:|unlock:|swap:|addliq:`).
+Tx формат (см. `core-ts/ledger.ts` Tx): `from, to?, amount (bigint→string в JSON), fee, nonce, intent (обязательно), domain (обязательно), timestamp, sig{edSig,mlSig,hybrid}, mlPublicKeyB64, edPublicB64? (обязателен при первой трате — TOFU binding), nullifier?, data?` (`stake:|unstake:|unlock:|swap:|addliq:`).
+
+`aeg_sendTx` params: `[tx]` или `[tx, assertion]`, где `assertion = {credentialId, clientDataJSON, authenticatorData, signature}` — обязателен, если у `tx.from` привязан passkey (v1.12). Challenge assertion'а = `sha256(txMessage)`.
+
+Fee policy: `tx.fee >= chain.feeMarket.baseFee`, иначе ошибка с подсказкой `aeg_gasPrice`.
 
 ## Ошибки
 

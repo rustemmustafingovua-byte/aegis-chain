@@ -13,11 +13,17 @@ import { Governance } from "./governance.js";
 import { Bridge } from "./bridge.js";
 import type { P2pNode } from "./p2p.js";
 import type { Libp2pNode } from "./libp2p.js";
+import { verifyMerkleProof, type MerkleProof } from "./merkle.js";
+import {
+  PasskeyRegistry, verifyRegistration, verifyAssertion, challengeFromHex, defaultOrigins, defaultRpId,
+} from "./webauthn.js";
+import { hybridVerify } from "./hybrid.js";
+import { VERSION } from "./version.js";
 
 type RpcRequest = { jsonrpc: string; id: number | string; method: string; params: any[] };
 type RpcResponse = { jsonrpc: "2.0"; id: number | string; result?: unknown; error?: { code: number; message: string } };
 
-export type RpcDeps = { gov?: Governance; bridge?: Bridge; p2p?: P2pNode; libp2p?: Libp2pNode };
+export type RpcDeps = { gov?: Governance; bridge?: Bridge; p2p?: P2pNode; libp2p?: Libp2pNode; passkeys?: PasskeyRegistry };
 
 const ADMIN_METHODS = new Set(["aeg_faucet", "aeg_slash", "aeg_registerValidator", "aeg_commitMlKey", "aeg_prune", "aeg_checkpoint"]);
 
@@ -40,7 +46,7 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
       return res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32002, message: "rate limit exceeded" } }));
     }
 
-    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.11.0" })); }
+    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: VERSION })); }
     if (req.url === "/metrics") {
       res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4" });
       const lines = [
@@ -73,6 +79,9 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
         mempool: chain.mempool.size,
         supply: chain.ledger.totalSupply().toString(),
         stateRoot: chain.ledger.stateRoot(),
+        baseFee: chain.feeMarket.baseFee.toString(),
+        suggestedFee: chain.feeMarket.suggest().toString(),
+        passkeys: deps.passkeys ? deps.passkeys.byCredential.size : 0,
         validators: [...chain.validators.values()].map((v) => ({ edPublic: v.publicKey.slice(0, 20) + "…", stake: v.stake.toString(), address: v.address ?? null })),
         accounts: [...chain.ledger.accounts.entries()].map(([addr, a]) => ({ addr, balance: a.balance.toString(), stake: a.stake.toString(), nonce: a.nonce, humanityScore: a.humanityScore ?? null })),
         pools,
@@ -110,6 +119,10 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
     });
   });
 
+  function sha256Hex(buf: Buffer): string {
+    return createHash("sha256").update(buf).digest("hex");
+  }
+
   function dispatch(method: string, params: any[]) {
     switch (method) {
       case "aeg_getState": return { height: chain.height, head: chain.head?.hash ?? null, supply: chain.ledger.totalSupply().toString(), stateRoot: chain.ledger.stateRoot() };
@@ -135,7 +148,33 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
       case "aeg_sendTx": {
         // v0.7: validate before mempool (was blind add — spam vector)
         const tx = parseTx(params[0]);
+        // v1.12: fee market admission policy (wallet must quote aeg_gasPrice)
+        if (tx.fee < chain.feeMarket.baseFee) {
+          throw new Error(`fee ${tx.fee} below base fee ${chain.feeMarket.baseFee} (use aeg_gasPrice)`);
+        }
         chain.ledger.canApply(tx);
+        // v1.12: accounts with a bound passkey must present a fresh WebAuthn assertion
+        // over the exact tx message — phishing/agent replay cannot satisfy this.
+        if (deps.passkeys?.has(tx.from)) {
+          const assertion = params[1];
+          if (!assertion || typeof assertion !== "object") throw new Error("passkey assertion required for this account");
+          const binding = deps.passkeys.get(assertion.credentialId);
+          if (!binding || binding.address !== tx.from) throw new Error("passkey credential is not bound to sender");
+          const challengeHex = sha256Hex(chain.ledger.txMessage(tx));
+          const res = verifyAssertion({
+            clientDataJSON: assertion.clientDataJSON,
+            authenticatorData: assertion.authenticatorData,
+            signature: assertion.signature,
+            expectedChallenge: challengeFromHex(challengeHex),
+            expectedOrigin: defaultOrigins(),
+            expectedRpId: defaultRpId(),
+            publicKeyJwk: binding.publicKeyJwk,
+            storedCounter: binding.counter,
+            requireUserVerification: false,
+          });
+          if (!res.ok) throw new Error(`passkey assertion rejected: ${res.reason}`);
+          deps.passkeys.touch(assertion.credentialId, res.newCounter);
+        }
         chain.mempool.add(tx);
         // gossip to peers if attached (dual transport)
         try { deps.p2p?.gossipTx(tx); } catch {}
@@ -247,6 +286,77 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
       }
       case "aeg_prune": return { prunedHeight: chain.prune(Number(params[0] ?? 100)) };
       case "aeg_sync": return { height: chain.height, blocks: chain.blocks.length, stateRoot: chain.ledger.stateRoot() };
+
+      // ---- v1.12: fee market ----
+      case "aeg_gasPrice": {
+        return {
+          baseFee: chain.feeMarket.baseFee.toString(),
+          priorityFee: "1000",
+          suggestedMaxFee: chain.feeMarket.suggest().toString(),
+          median: chain.feeMarket.median().toString(),
+        };
+      }
+      case "aeg_feeHistory": {
+        const n = Math.min(Number(params[0] ?? 10), 64);
+        return chain.feeMarket.history.slice(-n);
+      }
+
+      // ---- v1.12: light-client state proofs ----
+      case "aeg_getProof": {
+        const address = params[0] as string;
+        if (!address || !address.startsWith("aeg1")) throw new Error("bad address");
+        const proof: MerkleProof = chain.ledger.accountProof(address);
+        return { ...proof, height: chain.height, stateRoot: chain.ledger.stateRoot(), verified: verifyMerkleProof(proof) };
+      }
+
+      // ---- v1.12: passkey (WebAuthn) binding ----
+      case "aeg_passkeyRegister": {
+        if (!deps.passkeys) throw new Error("passkey registry not attached");
+        const [address, credentialId, clientDataJSON, attestationObject, proof, mlPublicKeyB64, label] =
+          params as [string, string, string, string, any, string, string?];
+        if (!address?.startsWith("aeg1")) throw new Error("bad address");
+        if (!credentialId || !clientDataJSON || !attestationObject) throw new Error("missing webauthn payload");
+        const acct = chain.ledger.get(address);
+        if (!acct.edPublic) throw new Error("account has no bound Ed25519 key yet (send one tx first)");
+        if (!proof?.edSig || !proof?.mlSig || typeof proof?.hybrid !== "string") throw new Error("missing binding proof");
+        // 1) owner proof: hybrid signature over the deterministic binding message
+        const bindingMsg = Buffer.from(`aegis-passkey-bind|${address}|${credentialId}`);
+        const mlPub = Buffer.from(mlPublicKeyB64 ?? "", "base64");
+        if (!hybridVerify(acct.edPublic, new Uint8Array(mlPub), bindingMsg, proof)) throw new Error("binding proof: bad hybrid signature");
+        if (acct.mlPublicHash) {
+          const h = createHash("sha256").update(mlPub).digest("hex");
+          if (h !== acct.mlPublicHash) throw new Error("binding proof: ML-DSA key does not match account commitment");
+        }
+        // 2) WebAuthn registration ceremony (challenge = H(bindingMsg))
+        const expectedChallenge = challengeFromHex(createHash("sha256").update(bindingMsg).digest("hex"));
+        const reg = verifyRegistration({
+          clientDataJSON, attestationObject, expectedChallenge,
+          expectedOrigin: defaultOrigins(), expectedRpId: defaultRpId(),
+        });
+        if (reg.credentialId !== credentialId) throw new Error("credentialId mismatch in attestation");
+        // 3) no cross-account rebinding
+        const existing = deps.passkeys.get(credentialId);
+        if (existing && existing.address !== address) throw new Error("credential already bound to another address");
+        deps.passkeys.bind({
+          address, credentialId, publicKeyJwk: reg.publicKeyJwk, alg: reg.alg,
+          counter: reg.counter, createdAt: Date.now(), label,
+        });
+        return { bound: true, address, credentialId, alg: reg.alg };
+      }
+      case "aeg_passkeyInfo": {
+        if (!deps.passkeys) throw new Error("passkey registry not attached");
+        return deps.passkeys.forAddress(params[0] as string).map((b) => ({
+          credentialId: b.credentialId, alg: b.alg, counter: b.counter, label: b.label ?? null,
+          createdAt: b.createdAt, lastUsedAt: b.lastUsedAt ?? null,
+        }));
+      }
+      case "aeg_passkeyRevoke": {
+        if (!deps.passkeys) throw new Error("passkey registry not attached");
+        const [address, credentialId] = params as [string, string];
+        const b = deps.passkeys.get(credentialId);
+        if (!b || b.address !== address) throw new Error("credential not bound to address");
+        return { revoked: deps.passkeys.unbind(credentialId) };
+      }
       default: throw new Error(`unknown method ${method}`);
     }
   }

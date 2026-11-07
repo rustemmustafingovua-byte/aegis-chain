@@ -4,7 +4,8 @@
  * + hybrid sig checks, nullifier tracking, colluding-agent slash
  * v0.7: fee to proposer (not burn), rewardProposer 3% APR, unstake delay, serialization
  */
-import { sha256, verify } from "./crypto.js";
+import { sha256, verify, addressFromPublicKey } from "./crypto.js";
+import { merkleRoot, merkleProof, type MerkleProof } from "./merkle.js";
 import { hybridVerify, mlPublicKeyHash } from "./hybrid.js";
 import type { HybridSignature } from "./hybrid.js";
 
@@ -40,6 +41,8 @@ export type Tx = {
   timestamp: number;
   sig: HybridSignature;
   mlPublicKeyB64: string;
+  /** v1.12 TOFU key binding: required on the first spend of an address (not part of txMessage). */
+  edPublicB64?: string;
   nullifier?: string;
   data?: string; // stake: / unstake: / addliq: / swap:
 };
@@ -85,6 +88,8 @@ export class Ledger {
     const edPub = from.edPublic;
     if (edPub) {
       if (!hybridVerify(edPub, new Uint8Array(mlPub), this.txMessage(tx), tx.sig)) throw new LedgerError("bad hybrid sig");
+    } else {
+      this.checkFirstSpendBinding(tx, mlPub);
     }
     if (tx.timestamp < Date.now() - 300_000 || tx.timestamp > Date.now() + 300_000) {
       // allow old test txs within 5min window — do not reject strictly for demo chain
@@ -94,12 +99,25 @@ export class Ledger {
     if (!tx.intent || tx.intent.length > 500) throw new LedgerError("intent required (Anti-AI Shield)");
     if (!tx.domain) throw new LedgerError("domain required (Domain Binding)");
   }
+  /**
+   * v1.12: first-spend key binding check.
+   * Address = derived from Ed25519 pubkey, so a tx may only bind a key that hashes
+   * to the sender address. Prevents "unsigned account" spends after faucet funding.
+   */
+  private checkFirstSpendBinding(tx: Tx, mlPub: Buffer): void {
+    if (!tx.edPublicB64) throw new LedgerError("unbound account: tx must include edPublicB64 on first spend");
+    if (addressFromPublicKey(tx.edPublicB64, "aeg") !== tx.from) throw new LedgerError("edPublicB64 does not derive sender address");
+    if (!hybridVerify(tx.edPublicB64, new Uint8Array(mlPub), this.txMessage(tx), tx.sig)) throw new LedgerError("bad hybrid sig (first spend)");
+  }
   apply(tx: Tx, proposerAddr?: string, currentHeight?: number): boolean {
     const from = this.get(tx.from);
     const mlPub = Buffer.from(tx.mlPublicKeyB64, "base64");
     const edPub = from.edPublic;
     if (edPub) {
       if (!hybridVerify(edPub, new Uint8Array(mlPub), this.txMessage(tx), tx.sig)) throw new LedgerError("bad hybrid sig");
+    } else {
+      // v1.12 TOFU binding: an address is H(edPub), so only the key holder can bind it.
+      this.checkFirstSpendBinding(tx, mlPub);
     }
     if (tx.nonce !== from.nonce) throw new LedgerError(`bad nonce: expected ${from.nonce}, got ${tx.nonce}`);
     if (tx.nullifier && this.spentNullifiers.has(tx.nullifier)) throw new LedgerError("double-spend: nullifier spent");
@@ -127,6 +145,11 @@ export class Ledger {
     // v0.7: fee goes to proposer (not burn) — incentive-compatible, as Lumen roadmap
     from.balance -= total;
     from.nonce += 1;
+    // v1.12: bind key material on first spend (TOFU) — no more "unsigned accounts"
+    if (!from.edPublic && tx.edPublicB64) {
+      from.edPublic = tx.edPublicB64;
+      from.mlPublicHash = mlPublicKeyHash(new Uint8Array(mlPub));
+    }
     if (tx.fee > 0n && proposerAddr) {
       this.get(proposerAddr).balance += tx.fee;
     } else if (tx.fee > 0n) {
@@ -248,10 +271,11 @@ export class Ledger {
     return out;
   }
   pool(key: string): Pool | undefined { return this.pools.get(key); }
-  stateRoot(): string {
+  /** Sorted state leaves — deterministic across nodes (v1.12: Merkle-committed). */
+  stateLeaves(): string[] {
     const parts: string[] = [];
     for (const [addr, a] of [...this.accounts].sort((x, y) => (x[0] < y[0] ? -1 : 1))) {
-      parts.push(`${addr}:${a.balance}:${a.stake}:${a.nonce}:${a.pendingUnstake ?? 0n}`);
+      parts.push(`account:${addr}:${a.balance}:${a.stake}:${a.nonce}:${a.pendingUnstake ?? 0n}`);
     }
     for (const [key, p] of [...this.pools].sort((x, y) => (x[0] < y[0] ? -1 : 1))) {
       parts.push(`pool:${key}:${p.base}:${p.quote}:${p.totalShares}`);
@@ -259,7 +283,32 @@ export class Ledger {
         parts.push(`lp:${key}:${owner}:${shares}`);
       }
     }
-    return sha256(parts.join("|"));
+    return parts;
+  }
+  /**
+   * v1.12: state root = domain-separated Merkle root over sorted leaves.
+   * Same tree backs light-client account proofs (see accountProof / aeg_getProof).
+   */
+  stateRoot(): string {
+    const leaves = this.stateLeaves();
+    return leaves.length ? merkleRoot(leaves) : sha256("");
+  }
+  /** Canonical single-account leaf; also used by light clients to verify proofs. */
+  accountLeaf(address: string): string {
+    const a = this.accounts.get(address);
+    if (!a) throw new LedgerError("unknown account");
+    return `account:${address}:${a.balance}:${a.stake}:${a.nonce}:${a.pendingUnstake ?? 0n}`;
+  }
+  /** Merkle inclusion proof for an account in the current state tree. */
+  accountProof(address: string): MerkleProof {
+    const leaves = this.stateLeaves();
+    const leaf = this.accountLeaf(address);
+    const idx = leaves.indexOf(leaf);
+    if (idx < 0) throw new LedgerError("account not in state tree");
+    const proof = merkleProof(leaves, idx);
+    // root from the same tree must match stateRoot() — sanity guard
+    if (proof.root !== this.stateRoot()) throw new LedgerError("state root mismatch while proving");
+    return proof;
   }
   /**
    * v0.7: serialize to JSON (bigint→string) for node persistence.
