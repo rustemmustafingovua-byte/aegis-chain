@@ -1,11 +1,12 @@
 /**
- * AEGIS libp2p Noise Transport v1.3 — production P2P поверх js-libp2p
+ * AEGIS libp2p Noise Transport v1.4 — production P2P поверх js-libp2p
  *
  * v0.8: P2pNode (TCP lite, node:net) — bootstrap + LoRa/USB fallback.
  * v0.9: Libp2pNode — full libp2p stack: TCP + Noise (Noise_XX_25519_AESGCM_SHA256)
  * v1.2: gossipsub миграция — pub/sub на topic /aegis/1.0/gossip (тот же P2pMessage JSON),
  *   stream protocol /aegis/1.0/gossip оставлен как fallback + direct dial
  * v1.3: bootstrap discovery — libp2p bootstrap service (multiaddr list) поверх TCP-lite Discovery
+ * v1.4: Kad DHT — peer routing /aegis/kad/1.0.0 (findPeer без централизованного bootstrap)
  *   transports: TCP (/ip4/0.0.0.0/tcp/PORT) — production internet path
  *   connectionEncrypters: Noise (Noise_XX_25519_AESGCM_SHA256 pureJsCrypto)
  *   streamMuxer: default mplex (multiplexed gossip streams per peer)
@@ -28,6 +29,7 @@ import { tcp } from "@libp2p/tcp";
 import { gossipsub, StrictNoSign } from "@libp2p/gossipsub";
 import { identify } from "@libp2p/identify";
 import { bootstrap } from "@libp2p/bootstrap";
+import { kadDHT } from "@libp2p/kad-dht";
 import type { Chain, Block } from "./chain.js";
 import { parseTx, stringify, type Tx } from "./ledger.js";
 import { verify, sign } from "./crypto.js";
@@ -99,6 +101,7 @@ export class Libp2pNode {
       services: {
         identify: identify() as any,
         ...(bootList.length ? { bootstrap: bootstrap({ list: bootList as any, tagName: "bootstrap", tagValue: 50 }) as any } : {}),
+        dht: kadDHT({ protocol: "/aegis/kad/1.0.0", clientMode: false }) as any,
         gossipsub: gossipsub({
           globalSignaturePolicy: StrictNoSign, // we auth via HELLO hybrid (chain-level), libp2p key not identity
         }) as any,

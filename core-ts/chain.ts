@@ -246,6 +246,11 @@ export class Chain {
     if (total === 0n) return false;
     return this.totalStake() >= (total * 2n) / 3n;
   }
+  /** Halving factor (4-year halving): reward halves every 4 * BLOCKS_PER_YEAR blocks. Returns 1,2,4… */
+  halvingFactor(height = this.height): number {
+    const halvingInterval = 7_884_000 * 4; // blocks (4s slots * 4 years)
+    return 1 << Math.floor(height / halvingInterval);
+  }
   // ---- snapshot / prune (v1.2: cheap archives without full replay) ----
   snapshot(): { hash: string; height: number; stateRoot: string; size: number } {
     const data = this.serialize();

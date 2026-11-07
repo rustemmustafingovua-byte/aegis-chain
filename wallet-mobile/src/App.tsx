@@ -3,6 +3,7 @@ import QRCode from "qrcode";
 import { createPasskey, authPasskey, encryptKeys, decryptKeys, localEntropy } from "./lib/passkey";
 import { hybridGenerate, signIntent, offlinePacket, behavioralScore } from "./lib/aegis-wallet";
 import { splitSecret, recoverSecret, backupJson, parseBackup, secretFingerprint } from "./lib/shamir";
+import { bleSupported, bleScanAndRead } from "./lib/ble";
 
 type Stored = { iv: string; ct: string; credentialId: string; address: string };
 type TxItem = { hash: string; to: string; amount: string; intent: string; verdict: string; score: number; ts: number };
@@ -206,10 +207,24 @@ export default function App() {
     } catch (e: any) { setStatus(`Сканер недоступен: ${e.message}`); }
   }
 
+  async function onBleScan() {
+    try {
+      if (!bleSupported()) { setStatus("Web Bluetooth не поддерживается (iOS Safari) — используй QR"); return; }
+      setStatus("BLE scan: выбери AEGIS mesh device…");
+      const json = await bleScanAndRead();
+      try {
+        const pkt = JSON.parse(json);
+        if (pkt.to) { setTo(pkt.to); setAmount(String(pkt.amount ?? amount)); setIntent(String(pkt.intent ?? intent)); showToast("BLE пакет принят"); }
+        else setMeshPacket(json);
+        setStatus("BLE mesh-пакет принят и распарсен");
+      } catch { setMeshPacket(json); showToast("BLE пакет принят (сырьё)"); }
+    } catch (e: any) { setStatus(`BLE недоступен: ${e.message}`); }
+  }
+
   return (
     <div className="app">
       <div className="hero">
-        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.1</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span></div>
+        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.4</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span></div>
         <h1>Щит Афины.<br />Ключи — в железе, намерение — на экране.</h1>
         <p>Hybrid Ed25519 + ML-DSA-65 · Intent-Bound · Offline Mesh. Агент не подпишет за тебя: нужны Passkey + живой человек + домен.</p>
       </div>
@@ -235,7 +250,8 @@ export default function App() {
           <h3>Intent-bound платёж</h3>
           <label>Кому (aeg1…)</label>
           <div style={{ display: "flex", gap: 6 }}><input value={to} onChange={(e) => setTo(e.target.value)} placeholder="aeg1…" style={{ flex: 1 }} />
-          <button className="secondary" style={{ width: "auto" }} onClick={onScan}>📷 scan</button></div>
+          <button className="secondary" style={{ width: "auto" }} onClick={onScan}>📷 scan</button>
+          <button className="secondary" style={{ width: "auto" }} onClick={onBleScan}>📡 BLE</button></div>
           <label>Сумма (base units, 6 decimals)</label><input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1000000" />
           <label>Зачем (intent — видно человеку и сети)</label><input value={intent} onChange={(e) => setIntent(e.target.value)} placeholder="продажа велосипеда #4721" />
           <label>Домен (domain binding — фишинг уже не сработает)</label><input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="marketplace.aegis.local" />

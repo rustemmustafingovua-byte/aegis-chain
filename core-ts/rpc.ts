@@ -24,7 +24,7 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
     res.setHeader("Access-Control-Allow-Headers", "content-type");
     if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
 
-    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.3.0" })); }
+    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.4.0" })); }
     if (req.url === "/metrics") {
       res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4" });
       const lines = [
@@ -176,6 +176,8 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
       }
       case "aeg_metrics": return { height: chain.height, mempool: chain.mempool.size, blocks: chain.blocks.length, validators: chain.validators.size, uptime: Math.floor(process.uptime()) };
       case "aeg_walStatus": return { wal: "aegis-chain.wal.ndjson", height: chain.height, blocks: chain.blocks.length, snapshotEvery: 1000 };
+      case "aeg_finality": return { finalized: chain.isFinalized(), height: chain.height, totalStake: chain.totalStake().toString() };
+      case "aeg_halving": return { height: chain.height, halvingFactor: chain.halvingFactor(), halvingEvery: 7_884_000 * 4 };
       case "aeg_snapshot": return chain.snapshot();
       case "aeg_prune": return { prunedHeight: chain.prune(Number(params[0] ?? 100)) };
       case "aeg_sync": return { height: chain.height, blocks: chain.blocks.length, stateRoot: chain.ledger.stateRoot() };
