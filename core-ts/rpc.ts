@@ -24,7 +24,7 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
     res.setHeader("Access-Control-Allow-Headers", "content-type");
     if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
 
-    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.6.0" })); }
+    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.7.0" })); }
     if (req.url === "/metrics") {
       res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4" });
       const lines = [
@@ -177,6 +177,14 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
         }
         chain.addValidator(edPublic, mlPublicKeyB64, stake, address);
         return { registered: edPublic.slice(0, 20) + "…", stake: stake.toString() };
+      }
+      case "aeg_slash": {
+        const [addr, bpsRaw] = params as [string, string?];
+        if (!addr || !addr.startsWith("aeg1")) throw new Error("bad address");
+        const bps = BigInt(bpsRaw ?? "1000");
+        if (bps <= 0n || bps > 10000n) throw new Error("bad bps");
+        const cut = chain.ledger.slash(addr, bps);
+        return { slashed: addr, bps: bps.toString(), cut: cut.toString() };
       }
       case "aeg_metrics": return { height: chain.height, mempool: chain.mempool.size, blocks: chain.blocks.length, validators: chain.validators.size, uptime: Math.floor(process.uptime()) };
       case "aeg_walStatus": return { wal: "aegis-chain.wal.ndjson", height: chain.height, blocks: chain.blocks.length, snapshotEvery: 1000 };

@@ -293,7 +293,7 @@ async function refresh(){
     let total=0n; for(const a of state.accounts) total+=BigInt(a.stake);
     document.getElementById('totalStake').textContent=total.toString();
     document.getElementById('valCount').textContent=(state.validators||[]).length;
-    document.getElementById('validators').innerHTML=(state.validators||[]).map(v=>`<tr><td class="mono">${v.edPublic}</td><td>${v.stake}</td><td class="mono">${v.address||''}</td></tr>`).join('');
+    document.getElementById('validators').innerHTML=(state.validators||[]).map(v=>`<tr style="cursor:pointer" onclick="showAccount('${v.address||''}')"><td class="mono">${v.edPublic}</td><td>${v.stake}</td><td class="mono">${v.address||''}</td></tr>`).join('');
     document.getElementById('proposals').innerHTML=(state.proposals||[]).map(p=>`<tr><td class="mono">${p.id}</td><td>${p.title}</td><td class="mono">${p.action}</td><td>${p.votesFor}</td><td>${p.votesAgainst}</td><td>${p.humanityVotes}</td><td><span class="${p.status==='passed'?'ok':p.status==='failed'?'bad':'warn'}">${p.status}</span></td></tr>`).join('') || '<tr><td class="hint" colspan="7">no proposals</td></tr>';
   }catch(e){ document.getElementById('netstat').textContent='● offline'; }
 }

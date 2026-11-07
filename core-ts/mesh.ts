@@ -1,6 +1,7 @@
 /**
  * AEGIS Mesh — DTN / epidemic gossip, QR/BLE/LoRa transports
  */
+import * as fs from "node:fs";
 import { sha256 } from "./crypto.js";
 import type { OfflineTx } from "./autonomy.js";
 import { offlineSign } from "./autonomy.js";
@@ -86,6 +87,21 @@ export class MeshNode {
     return tx;
   }
   queueForCarry(p: MeshPacket) { this.offlineQueue.push(p); }
+  /** v1.7: persist offline queue to file (DTN store-carry-forward durable) */
+  saveQueue(filePath: string) {
+    const data = JSON.stringify(this.offlineQueue, (_k, v) => (typeof v === "bigint" ? v.toString() : v));
+    fs.writeFileSync(filePath, data, "utf8");
+  }
+  loadQueue(filePath: string): number {
+    try {
+      if (!fs.existsSync(filePath)) return 0;
+      const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      // restore bigint fields
+      for (const p of data) { if (p.tx && p.tx.amount != null) p.tx.amount = BigInt(p.tx.amount); }
+      this.offlineQueue = data as MeshPacket[];
+      return data.length;
+    } catch { return 0; }
+  }
   flushCarry(nodes: Record<string, MeshNode>): number {
     let flushed = 0;
     const remaining: MeshPacket[] = [];

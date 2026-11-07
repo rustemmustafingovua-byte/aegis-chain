@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aegis-node
+  labels:
+    app: aegis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aegis
+  template:
+    metadata:
+      labels:
+        app: aegis
+    spec:
+      containers:
+        - name: aegis
+          image: ghcr.io/rustemmustafingovua-byte/aegis-chain:latest
+          ports:
+            - containerPort: 8899
+            - containerPort: 3899
+            - containerPort: 4899
+          env:
+            - name: AEGIS_FAUCET
+              value: "on"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8899
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8899
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "500m"
+            limits:
+              memory: "1Gi"
+              cpu: "2000m"
+          volumeMounts:
+            - name: state
+              mountPath: /app/state
+      volumes:
+        - name: state
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aegis
+spec:
+  selector:
+    app: aegis
+  ports:
+    - port: 8899
+      targetPort: 8899
+      name: rpc
+    - port: 3899
+      targetPort: 3899
+      name: p2p
+    - port: 4899
+      targetPort: 4899
+      name: libp2p

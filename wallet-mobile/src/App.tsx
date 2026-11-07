@@ -30,6 +30,7 @@ export default function App() {
   const [signedTx, setSignedTx] = useState<any>(null);
   const [meshPacket, setMeshPacket] = useState("");
   const [qrData, setQrData] = useState("");
+  const [recvQr, setRecvQr] = useState("");
   const [balance, setBalance] = useState("—");
   const [rpcUrl, setRpcUrl] = useState(() => localStorage.getItem("aegis.rpc") || "");
   const [backup, setBackup] = useState("");
@@ -57,6 +58,11 @@ export default function App() {
     if (!meshPacket) { setQrData(""); return; }
     QRCode.toDataURL(meshPacket.slice(0, 900), { margin: 1, width: 220 }).then(setQrData).catch(() => setQrData(""));
   }, [meshPacket]);
+
+  useEffect(() => {
+    if (!address) { setRecvQr(""); return; }
+    QRCode.toDataURL(address, { margin: 1, width: 180 }).then(setRecvQr).catch(() => setRecvQr(""));
+  }, [address]);
 
   function showToast(t: string) { setToast(t); setTimeout(() => setToast(""), 2400); }
 
@@ -239,7 +245,7 @@ export default function App() {
   return (
     <div className="app">
       <div className="hero">
-        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.6</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span></div>
+        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.7</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span></div>
         <h1>Щит Афины.<br />Ключи — в железе, намерение — на экране.</h1>
         <p>Hybrid Ed25519 + ML-DSA-65 · Intent-Bound · Offline Mesh. Агент не подпишет за тебя: нужны Passkey + живой человек + домен.</p>
       </div>
@@ -263,6 +269,8 @@ export default function App() {
           <button className="btn secondary" onClick={() => copyText(address)} disabled={!address}>Копировать адрес</button>
         </div>
         <div className="hint" style={{ marginTop: 8 }}>{keys ? <span className="ok">● сессия активна {keys.address.slice(0, 8)}…</span> : <span className="warn">● сессия закрыта — ключи в памяти стёрты</span>}</div>
+        {recvQr && (<div className="qr"><img src={recvQr} alt="receive QR" style={{ width: 160, height: 160 }} /></div>)}
+        <div className="hint">Принимай — покажи QR, отправитель отсканирует 📷</div>
       </div>
 
       <div className="card">

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert";
 import * as fs from "node:fs";
 import { Chain } from "../core-ts/chain.js";
+import { MeshNode } from "../core-ts/mesh.js";
 import { Wal, walPaths } from "../core-ts/wal.js";
 import { Ledger } from "../core-ts/ledger.js";
 import { Governance } from "../core-ts/governance.js";
@@ -54,7 +55,7 @@ test("comprehensive: metrics endpoint shape", async () => {
     assert.match(txt, /aegis_supply/);
     const h = await fetch(`http://127.0.0.1:${port}/health`);
     const hj = await h.json();
-    assert.equal(hj.version, "1.6.0");
+    assert.equal(hj.version, "1.7.0");
   } finally { server.close(); }
 });
 
@@ -127,4 +128,20 @@ test("comprehensive: governance execute fee change + halving", () => {
   const r1 = chain.ledger.rewardProposer(a.address, 10_000_000_000000n, 10_000_000_000000n, 1);
   const r2 = chain.ledger.rewardProposer(a.address, 10_000_000_000000n, 10_000_000_000000n, 2);
   assert.ok(r1 >= r2);
+});
+
+test("comprehensive: slash reduces stake, mesh queue persistence", () => {
+  const chain = new Chain();
+  const a = hybridGenerate(randomBytes(32));
+  chain.ledger.get(a.address).stake = 1_000_000_000_000n;
+  const cut = chain.ledger.slash(a.address, 1000n);
+  assert.equal(cut, 100_000_000_000n);
+  assert.equal(chain.ledger.get(a.address).stake, 900_000_000_000n);
+  // mesh queue roundtrip
+  const node = new MeshNode("test-node", hybridGenerate(randomBytes(32)));
+  node.queueForCarry({ type: "AEGIS_PACKET", v: "0.4", tx: {} as any, txHash: "h", nullifier: "n", hops: 0, ttl: 8, priority: "normal", origin: node.addr, createdAt: Date.now(), transport: "QR" } as any);
+  node.saveQueue("/tmp/aegis-mesh-queue.json");
+  const n = new MeshNode("test-node2", hybridGenerate(randomBytes(32)));
+  const loaded = n.loadQueue("/tmp/aegis-mesh-queue.json");
+  assert.equal(loaded, 1);
 });
