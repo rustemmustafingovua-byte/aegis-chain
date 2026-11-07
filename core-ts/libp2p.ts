@@ -6,7 +6,7 @@
  * v1.2: gossipsub миграция — pub/sub на topic /aegis/1.0/gossip (тот же P2pMessage JSON),
  *   stream protocol /aegis/1.0/gossip оставлен как fallback + direct dial
  * v1.3: bootstrap discovery — libp2p bootstrap service (multiaddr list) поверх TCP-lite Discovery
- * v1.4: Kad DHT — peer routing /aegis/kad/1.0.0 (findPeer без централизованного bootstrap)
+ * v1.4: finality/halving RPC, Paymaster contract, BLE UI (Kad DHT отложен — peerId API mismatch с libp2p 3.5.1)
  *   transports: TCP (/ip4/0.0.0.0/tcp/PORT) — production internet path
  *   connectionEncrypters: Noise (Noise_XX_25519_AESGCM_SHA256 pureJsCrypto)
  *   streamMuxer: default mplex (multiplexed gossip streams per peer)
@@ -29,7 +29,6 @@ import { tcp } from "@libp2p/tcp";
 import { gossipsub, StrictNoSign } from "@libp2p/gossipsub";
 import { identify } from "@libp2p/identify";
 import { bootstrap } from "@libp2p/bootstrap";
-import { kadDHT } from "@libp2p/kad-dht";
 import type { Chain, Block } from "./chain.js";
 import { parseTx, stringify, type Tx } from "./ledger.js";
 import { verify, sign } from "./crypto.js";
@@ -101,7 +100,6 @@ export class Libp2pNode {
       services: {
         identify: identify() as any,
         ...(bootList.length ? { bootstrap: bootstrap({ list: bootList as any, tagName: "bootstrap", tagValue: 50 }) as any } : {}),
-        dht: kadDHT({ protocol: "/aegis/kad/1.0.0", clientMode: false }) as any,
         gossipsub: gossipsub({
           globalSignaturePolicy: StrictNoSign, // we auth via HELLO hybrid (chain-level), libp2p key not identity
         }) as any,
