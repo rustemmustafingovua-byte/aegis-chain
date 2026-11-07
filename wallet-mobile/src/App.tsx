@@ -11,6 +11,8 @@ type TxItem = { hash: string; to: string; amount: string; intent: string; verdic
 
 export default function App() {
   const [keys, setKeys] = useState<any>(null);
+  const [lang, setLang] = useState<"ru" | "en">(() => ((localStorage.getItem("aegis.lang") as any) || "ru"));
+  const t = (ru: string, en: string) => (lang === "ru" ? ru : en);
   const [address, setAddress] = useState("");
   const [wallets, setWallets] = useState<Stored[]>(() => {
     try {
@@ -105,9 +107,10 @@ export default function App() {
       const edPrivate = new Uint8Array([...atob(parsed.edPrivate)].map((c) => c.charCodeAt(0)));
       const kp = hybridGenerate(edPrivate);
       setKeys(kp); setAddress(kp.address);
-      setStatus("Кошелёк разблокирован через Passkey. Эфемерная сессия 60с — затем ключ стирается из RAM.");
-      showToast("Разблокировано");
-      setTimeout(() => setKeys(null), 60_000);
+      setStatus(t("Кошелёк разблокирован через Passkey. Эфемерная сессия — затем ключ стирается из RAM.", "Wallet unlocked via Passkey. Ephemeral session — then key wipes from RAM."));
+      showToast(t("Разблокировано", "Unlocked"));
+      const lockSec = Number(localStorage.getItem("aegis.lockSec") || 60);
+      setTimeout(() => setKeys(null), lockSec * 1000);
     } catch (e: any) {
       setStatus(`Разблокировка неудалась: ${e.message}`);
     }
@@ -253,7 +256,8 @@ export default function App() {
   return (
     <div className="app">
       <div className="hero">
-        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.10</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span></div>
+        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.11</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span>
+          <button className="secondary" style={{ width: "auto", padding: "6px 10px", marginLeft: 6 }} onClick={() => { const nl = lang === "ru" ? "en" : "ru"; setLang(nl); localStorage.setItem("aegis.lang", nl); }}>{lang === "ru" ? "EN" : "RU"}</button></div>
         <h1>Щит Афины.<br />Ключи — в железе, намерение — на экране.</h1>
         <p>Hybrid Ed25519 + ML-DSA-65 · Intent-Bound · Offline Mesh. Агент не подпишет за тебя: нужны Passkey + живой человек + домен.</p>
       </div>
@@ -273,9 +277,13 @@ export default function App() {
         <div className="hint" style={{ marginTop: 8 }}>{status}</div>
         <div className="grid" style={{ marginTop: 10 }}>
           <button className="btn" onClick={onCreate}>Создать Passkey + кошелёк</button>
-          <button className="btn secondary" onClick={onUnlock}>Разблокировать (60с)</button>
+          <button className="btn secondary" onClick={onUnlock}>Разблокировать</button>
           <button className="btn secondary" onClick={() => copyText(address)} disabled={!address}>Копировать адрес</button>
         </div>
+        <label style={{ marginTop: 6 }}>Lock timeout</label>
+        <select value={localStorage.getItem("aegis.lockSec") || "60"} onChange={(e) => localStorage.setItem("aegis.lockSec", e.target.value)} style={{ width: "100%" }}>
+          <option value="30">30s</option><option value="60">60s</option><option value="120">120s</option>
+        </select>
         <div className="hint" style={{ marginTop: 8 }}>{keys ? <span className="ok">● сессия активна {keys.address.slice(0, 8)}…</span> : <span className="warn">● сессия закрыта — ключи в памяти стёрты</span>}</div>
         {recvQr && (<div className="qr"><img src={recvQr} alt="receive QR" style={{ width: 160, height: 160 }} /></div>)}
         <div className="hint">Принимай — покажи QR, отправитель отсканирует 📷</div>

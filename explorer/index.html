@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<meta name="description" content="AEGIS Explorer — живой узел v1.3. Постквантовый hybrid-блокчейн, устойчивый к взлому и ИИ-агентам."/>
+<meta name="description" content="AEGIS Explorer — живой узел v1.11. Постквантовый hybrid-блокчейн, устойчивый к взлому и ИИ-агентам."/>
 <meta name="theme-color" content="#0b0e1a"/>
-<title>AEGIS Explorer — живой узел v1.3</title>
+<title>AEGIS Explorer — живой узел v1.11</title>
 <style>
 :root{
   --bg:#0b0e1a; --bg2:#0f132e; --card:#11162e; --card2:#161c3d;
@@ -78,7 +78,7 @@ footer{color:var(--mut);font-size:13px;margin-top:18px}
       <b style="font-size:17px">🛡️ AEGIS <span style="color:var(--cyan)">Explorer</span></b>
       <div class="row">
         <span class="badge" id="height">height …</span>
-        <span class="badge">v1.3</span>
+        <span class="badge">v1.11</span>
         <span class="badge" id="netstat">● live</span>
       </div>
     </div>
@@ -98,6 +98,7 @@ footer{color:var(--mut);font-size:13px;margin-top:18px}
       <div class="kpi"><div class="v" id="kSupply">…</div><div class="k">Supply (base units)</div></div>
       <div class="kpi"><div class="v" id="kPeers">…</div><div class="k">Peers</div></div>
       <div class="kpi"><div class="v" id="kPrice">…</div><div class="k">AMM price</div></div>
+      <div class="kpi"><div class="v" id="kBlockTime">…</div><div class="k">Avg block time</div></div>
     </div>
   </div>
 
@@ -228,7 +229,7 @@ footer{color:var(--mut);font-size:13px;margin-top:18px}
     </div>
   </div>
 
-  <footer>AEGIS v1.3 — постквантовый trust layer. Не финансовая рекомендация. Кошелёк: <span class="mono">wallet-mobile/</span> · Доки: <span class="mono">docs/</span> · Аудит: <span class="mono">SECURITY.md</span></footer>
+  <footer>AEGIS v1.11 — постквантовый trust layer. Не финансовая рекомендация. Кошелёк: <span class="mono">wallet-mobile/</span> · Доки: <span class="mono">docs/</span> · Аудит: <span class="mono">SECURITY.md</span></footer>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -289,6 +290,12 @@ async function refresh(){
     document.getElementById('poolPrice').textContent=pool? (pool.price||''):'';
     document.getElementById('kPrice').textContent=pool? pool.price:'—';
     if(pool && pool.price){ const p=parseFloat(pool.price); if(!isNaN(p)) priceHist.push(p); spark(); }
+    // block time avg from last 10 blocks
+    if(state.blocks && state.blocks.length > 1){
+      let sum=0,n=0;
+      for(let i=1;i<state.blocks.length;i++){ const d=state.blocks[i].timestamp-state.blocks[i-1].timestamp; if(d>0){sum+=d;n++;} }
+      document.getElementById('kBlockTime').textContent=n? (sum/n/1000).toFixed(1)+'s':'—';
+    }
     document.getElementById('poolDepth').innerHTML=pool? `<span class="chip">base ${pool.base} · quote ${pool.quote} · fee 30bps · shares ${pool.totalShares}</span>`:'';
     let total=0n; for(const a of state.accounts) total+=BigInt(a.stake);
     document.getElementById('totalStake').textContent=total.toString();

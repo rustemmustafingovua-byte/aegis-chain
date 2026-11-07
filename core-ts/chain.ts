@@ -108,6 +108,7 @@ export class Chain {
   validators = new Map<string, ValidatorInfo>();
   /** address → edPublic for reward payout (proposer is edPublic, ledger is address-keyed) */
   edToAddress = new Map<string, string>();
+  proposerCounts = new Map<string, number>();
 
   get height() { return this.prunedHeight + Math.max(0, this.blocks.length - 1); }
   get head(): Block | undefined { return this.blocks[this.blocks.length - 1]; }
@@ -226,10 +227,12 @@ export class Chain {
       this.ledger.apply(ntx, proposerAddr, b.header.height);
     }
     // v0.7: block reward 3% APR pro-rata (monetary expansion, Lumen economics)
+    // v1.11: halving-aware (reward halves every 4 years)
     if (proposerAddr) {
       const total = this.totalStake();
       const stake = v.stake > 0n ? v.stake : (this.ledger.accounts.get(proposerAddr)?.stake ?? 0n);
-      this.ledger.rewardProposer(proposerAddr, stake, total);
+      this.ledger.rewardProposer(proposerAddr, stake, total, this.halvingFactor(b.header.height));
+      this.proposerCounts.set(b.header.proposer, (this.proposerCounts.get(b.header.proposer) ?? 0) + 1);
     }
     this.blocks.push(b);
     return true;

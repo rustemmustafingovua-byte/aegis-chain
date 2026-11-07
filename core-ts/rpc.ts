@@ -40,7 +40,7 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
       return res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32002, message: "rate limit exceeded" } }));
     }
 
-    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.10.0" })); }
+    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.11.0" })); }
     if (req.url === "/metrics") {
       res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4" });
       const lines = [
@@ -224,6 +224,11 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
         // v1.6: checkpoint = snapshot + prune to 100 + WAL compact (single call)
         chain.prune(100);
         return { checkpoint: chain.snapshot(), prunedHeight: chain.prunedHeight };
+      }
+      case "aeg_validatorStats": {
+        const edPub = params[0] as string;
+        const v = chain.validators.get(edPub);
+        return v ? { edPublic: edPub, stake: v.stake.toString(), address: v.address ?? null, proposed: chain.proposerCounts.get(edPub) ?? 0, halvingFactor: chain.halvingFactor() } : null;
       }
       case "aeg_commitMlKey": {
         // v1.8: PQ hash commitment — store mlPublicHash for account (full 1952B key off-chain, hash on-chain)
