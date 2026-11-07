@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert";
+import * as fs from "node:fs";
 import { Chain } from "../core-ts/chain.js";
+import { Wal, walPaths } from "../core-ts/wal.js";
 import { Ledger } from "../core-ts/ledger.js";
 import { Governance } from "../core-ts/governance.js";
 import { Bridge } from "../core-ts/bridge.js";
@@ -52,7 +54,7 @@ test("comprehensive: metrics endpoint shape", async () => {
     assert.match(txt, /aegis_supply/);
     const h = await fetch(`http://127.0.0.1:${port}/health`);
     const hj = await h.json();
-    assert.equal(hj.version, "1.2.0");
+    assert.equal(hj.version, "1.3.0");
   } finally { server.close(); }
 });
 
@@ -86,4 +88,18 @@ test("comprehensive: snapshot and prune keep genesis anchor", () => {
   assert.equal(s.height, 0);
   assert.ok(s.hash.length === 16);
   assert.equal(chain.prune(100), 0); // nothing to prune
+});
+
+test("comprehensive: WAL append + status + compact", () => {
+  const chain = new Chain();
+  chain.genesis();
+  const { walPath, snapshotPath } = walPaths("/tmp/aegis-test-wal.json");
+  try { fs.unlinkSync(walPath); } catch {}
+  const wal = new Wal(walPath, snapshotPath);
+  // fake block minimal (header+txs+sig) — append does not verify
+  wal.append({ header: { height: 1, prevHash: "0".repeat(64), timestamp: 1, proposer: "x", merkleRoot: "0".repeat(64), txCount: 0, slot: 1 }, txs: [], signature: "s", mlSignatureB64: "", mlPublicKeyB64: "", hash: "0".repeat(64) } as any);
+  assert.equal(wal.blocks, 1);
+  const st = wal.status(1);
+  assert.equal(st.walBlocks, 1);
+  try { fs.unlinkSync(walPath); } catch {}
 });

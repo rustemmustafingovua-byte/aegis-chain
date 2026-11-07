@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/main.tsx","./src/lib/aegis-wallet.ts","./src/lib/passkey.ts","./src/lib/shamir.ts"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/main.tsx","./src/lib/aegis-wallet.ts","./src/lib/ble.ts","./src/lib/passkey.ts","./src/lib/shamir.ts"],"version":"5.9.3"}

@@ -12,6 +12,7 @@ import { Chain, SLOT_MS } from "./chain.js";
 import { createRpcServer } from "./rpc.js";
 import { P2pNode } from "./p2p.js";
 import { Libp2pNode } from "./libp2p.js";
+import { Wal, walPaths, WAL_SNAPSHOT_EVERY } from "./wal.js";
 import { Governance } from "./governance.js";
 import { Bridge } from "./bridge.js";
 import { Discovery, BOOTSTRAP } from "./discovery.js";
@@ -109,8 +110,14 @@ export async function serveNode(port = 8899, p2pPort = 3899, opts: ServeOpts = {
             p2p.gossipBlock(block);
             libp2pNode.gossipBlock(block);
             console.log(`[aegis] produced block height=${block.header.height} txs=${block.header.txCount}`);
-            // persist after each block (cheap for devnet; prod: async WAL)
-            try { chain.saveToFile(stateFile); } catch (e: any) { console.warn("[aegis] persist failed:", e.message); }
+            // WAL append (durable) + snapshot every WAL_SNAPSHOT_EVERY blocks
+            try {
+              const { walPath, snapshotPath } = walPaths(stateFile);
+              const wal = new Wal(walPath, snapshotPath);
+              wal.append(block);
+              if (block.header.height % WAL_SNAPSHOT_EVERY === 0) wal.compact(chain);
+              else chain.saveToFile(stateFile);
+            } catch (e: any) { console.warn("[aegis] persist failed:", e.message); }
           } else {
             // idle tick: advance slot counter without empty blocks (avoid chain bloat)
           }
