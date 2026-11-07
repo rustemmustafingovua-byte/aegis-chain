@@ -54,7 +54,7 @@ test("comprehensive: metrics endpoint shape", async () => {
     assert.match(txt, /aegis_supply/);
     const h = await fetch(`http://127.0.0.1:${port}/health`);
     const hj = await h.json();
-    assert.equal(hj.version, "1.5.0");
+    assert.equal(hj.version, "1.6.0");
   } finally { server.close(); }
 });
 

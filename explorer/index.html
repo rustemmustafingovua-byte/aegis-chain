@@ -283,7 +283,7 @@ async function refresh(){
       const isNew=!lastBlocks.has(b.height);
       return `<tr class="flash ${isNew?'new':''}"><td>${b.height}</td><td class="mono"><a href="#" onclick="showBlock(${b.height});return false">${b.hash}...</a></td><td>${b.txCount}</td><td class="mono" title="${b.proposer||''}">${(b.proposer||'').slice(0,12)}…</td><td>${new Date(b.timestamp).toLocaleTimeString()}</td></tr>`}).join('') || '<tr><td class="hint" colspan="5">нет блоков</td></tr>';
     state.blocks.forEach(b=>lastBlocks.add(b.height));
-    document.getElementById('accounts').innerHTML=state.accounts.map(a=>`<tr><td class="mono" title="${a.addr}">${a.addr.slice(0,16)}…</td><td>${a.balance}</td><td>${a.stake}</td><td>${a.nonce}</td><td>${a.humanityScore??'—'}</td></tr>`).join('');
+    document.getElementById('accounts').innerHTML=state.accounts.map(a=>`<tr style="cursor:pointer" onclick="showAccount('${a.addr}')"><td class="mono" title="${a.addr}">${a.addr.slice(0,16)}…</td><td>${a.balance}</td><td>${a.stake}</td><td>${a.nonce}</td><td>${a.humanityScore??'—'}</td></tr>`).join('');
     const pool=state.pools&&state.pools[0];
     document.getElementById('poolInfo').textContent=pool? `${pool.key}`:'no pool';
     document.getElementById('poolPrice').textContent=pool? (pool.price||''):'';
@@ -343,6 +343,11 @@ async function prune(){
   document.getElementById('snapOut').textContent=j.result? `prunedHeight ${j.result.prunedHeight}` : ('err: '+j.error?.message);
   refresh();
 }
+async function checkpoint(){
+  const j=await rpc('aeg_checkpoint',[]);
+  document.getElementById('snapOut').textContent=j.result? `checkpoint h=${j.result.checkpoint.height} prunedHeight ${j.result.prunedHeight}` : ('err: '+j.error?.message);
+  refresh();
+}
 async function verifyBlock(){
   const h=parseInt(document.getElementById('verifyH').value||'0',10);
   const j=await rpc('aeg_getBlock',[h]);
@@ -358,6 +363,12 @@ async function showBlock(h){
   const j=await rpc('aeg_getBlock',[h]);
   document.getElementById('mHeight').textContent='#'+h;
   document.getElementById('mBody').textContent=JSON.stringify(j.result,null,2).slice(0,12000);
+  document.getElementById('blockModal').style.display='block';
+}
+async function showAccount(addr){
+  const j=await rpc('aeg_getAccount',[addr]);
+  document.getElementById('mHeight').textContent='Account';
+  document.getElementById('mBody').textContent=JSON.stringify(j.result??j.error,null,2).slice(0,6000);
   document.getElementById('blockModal').style.display='block';
 }
 function closeModal(){ document.getElementById('blockModal').style.display='none'; }

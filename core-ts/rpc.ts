@@ -24,7 +24,7 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
     res.setHeader("Access-Control-Allow-Headers", "content-type");
     if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
 
-    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.5.0" })); }
+    if (req.url === "/health") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, height: chain.height, version: "1.6.0" })); }
     if (req.url === "/metrics") {
       res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4" });
       const lines = [
@@ -183,6 +183,11 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
       case "aeg_finality": return { finalized: chain.isFinalized(), height: chain.height, totalStake: chain.totalStake().toString() };
       case "aeg_halving": return { height: chain.height, halvingFactor: chain.halvingFactor(), halvingEvery: 7_884_000 * 4 };
       case "aeg_snapshot": return chain.snapshot();
+      case "aeg_checkpoint": {
+        // v1.6: checkpoint = snapshot + prune to 100 + WAL compact (single call)
+        chain.prune(100);
+        return { checkpoint: chain.snapshot(), prunedHeight: chain.prunedHeight };
+      }
       case "aeg_prune": return { prunedHeight: chain.prune(Number(params[0] ?? 100)) };
       case "aeg_sync": return { height: chain.height, blocks: chain.blocks.length, stateRoot: chain.ledger.stateRoot() };
       default: throw new Error(`unknown method ${method}`);

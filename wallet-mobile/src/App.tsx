@@ -11,6 +11,15 @@ type TxItem = { hash: string; to: string; amount: string; intent: string; verdic
 export default function App() {
   const [keys, setKeys] = useState<any>(null);
   const [address, setAddress] = useState("");
+  const [wallets, setWallets] = useState<Stored[]>(() => {
+    try {
+      const arr = JSON.parse(localStorage.getItem("aegis.wallets") || "[]");
+      if (Array.isArray(arr) && arr.length) return arr;
+      const single = localStorage.getItem("aegis.wallet");
+      return single ? [JSON.parse(single)] : [];
+    } catch { return []; }
+  });
+  const [activeIdx, setActiveIdx] = useState(0);
   const [status, setStatus] = useState("Не инициализировано. Создай Passkey.");
   const [toast, setToast] = useState("");
   const [tab, setTab] = useState<"wallet" | "send" | "history" | "shield">("wallet");
@@ -33,13 +42,16 @@ export default function App() {
   const firstTapRef = useRef<number>(Date.now());
 
   useEffect(() => {
-    const stored = localStorage.getItem("aegis.wallet");
-    if (stored) {
-      const s: Stored = JSON.parse(stored);
-      setAddress(s.address);
-      setStatus(`Есть зашифрованный кошелёк (${s.credentialId.slice(0, 8)}…). Аутентифицируйся Passkey.`);
+    const w = wallets[activeIdx];
+    if (w) {
+      setAddress(w.address);
+      setStatus(`Кошелёк ${w.address.slice(0, 12)}… (${w.credentialId.slice(0, 8)}…). Аутентифицируйся Passkey.`);
     }
-  }, []);
+  }, [activeIdx]);
+
+  useEffect(() => {
+    if (wallets.length && !address) setAddress(wallets[0].address);
+  }, [wallets]);
 
   useEffect(() => {
     if (!meshPacket) { setQrData(""); return; }
@@ -60,7 +72,11 @@ export default function App() {
         address: kp.address,
       });
       const { iv, ciphertext } = await encryptKeys(unwrapSeed, ent, pt);
-      localStorage.setItem("aegis.wallet", JSON.stringify({ iv, ct: ciphertext, credentialId, address: kp.address } as Stored));
+      const entry: Stored = { iv, ct: ciphertext, credentialId, address: kp.address };
+      const next = [...wallets, entry];
+      setWallets(next); setActiveIdx(next.length - 1);
+      localStorage.setItem("aegis.wallets", JSON.stringify(next));
+      localStorage.setItem("aegis.wallet", JSON.stringify(entry));
       setKeys(kp); setAddress(kp.address);
       setStatus("Кошелёк создан и зашифрован Passkey. Приватный ключ никто не увидит — не извлекай из железа.");
       showToast("Кошелёк создан");
@@ -70,10 +86,9 @@ export default function App() {
   }
 
   async function onUnlock() {
-    const stored = localStorage.getItem("aegis.wallet");
-    if (!stored) return setStatus("Нет сохранённого кошелька");
+    const s = wallets[activeIdx] ?? null;
+    if (!s) return setStatus("Нет сохранённого кошелька");
     try {
-      const s: Stored = JSON.parse(stored);
       const { unwrapSeed } = await authPasskey();
       const ent = await localEntropy();
       const pt = await decryptKeys(unwrapSeed, ent, s.iv, s.ct);
@@ -224,7 +239,7 @@ export default function App() {
   return (
     <div className="app">
       <div className="hero">
-        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.5</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span></div>
+        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.6</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span></div>
         <h1>Щит Афины.<br />Ключи — в железе, намерение — на экране.</h1>
         <p>Hybrid Ed25519 + ML-DSA-65 · Intent-Bound · Offline Mesh. Агент не подпишет за тебя: нужны Passkey + живой человек + домен.</p>
       </div>
@@ -232,6 +247,11 @@ export default function App() {
       <div className="card">
         <h3>Адрес</h3>
         <div className="mono" onClick={tap}>{address || "— создай Passkey —"}</div>
+        {wallets.length > 1 && (
+          <select value={activeIdx} onChange={(e) => { setActiveIdx(Number(e.target.value)); setKeys(null); }} style={{ marginTop: 6 }}>
+            {wallets.map((w, i) => (<option key={w.address + i} value={i}>{w.address.slice(0, 20)}… ({w.credentialId.slice(0, 6)})</option>))}
+          </select>
+        )}
         <div className="row" style={{ marginTop: 8 }}>
           <span className="badge">баланс <b className="mono">{balance}</b></span>
           <button className="secondary btn" style={{ padding: "8px 10px" }} onClick={checkBalance}>обновить</button>
@@ -292,6 +312,15 @@ export default function App() {
       {tab === "history" && (
         <div className="card">
           <h3>История (локально)</h3>
+          <div className="row" style={{ marginBottom: 8 }}>
+            <button className="secondary" style={{ padding: "8px 10px" }} onClick={() => {
+              const csv = "hash,to,amount,intent,verdict,score,ts\n" + history.map(h => `${h.hash},${h.to},${h.amount},"${h.intent}",${h.verdict},${h.score},${h.ts}`).join("\n");
+              const blob = new Blob([csv], { type: "text/csv" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a"); a.href = url; a.download = "aegis-history.csv"; a.click();
+              URL.revokeObjectURL(url);
+            }}>Export CSV</button>
+          </div>
           <div className="list">
             {history.length === 0 && <div className="hint">Пока нет подписанных транзакций. Подпиши платёж — он появится здесь.</div>}
             {history.map((h) => (
