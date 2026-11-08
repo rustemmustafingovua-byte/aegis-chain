@@ -5,6 +5,7 @@ import { hybridGenerate, hybridSign, ledgerTxMessage, signIntent, offlinePacket,
 import { splitSecret, recoverSecret, backupJson, parseBackup, secretFingerprint } from "./lib/shamir";
 import { bleSupported, bleScanAndRead } from "./lib/ble";
 import { toConfIntent } from "./lib/confidential";
+import { checkAnchor, loadPin } from "./lib/pin";
 
 type Stored = { iv: string; ct: string; credentialId: string; address: string; protection?: "prf" | "device" };
 type TxItem = { hash: string; to: string; amount: string; intent: string; verdict: string; score: number; ts: number };
@@ -37,6 +38,12 @@ export default function App() {
   const [qrData, setQrData] = useState("");
   const [recvQr, setRecvQr] = useState("");
   const [balance, setBalance] = useState("—");
+  // v1.14: pinned checkpoint = защита от отката/форка истории узлом
+  const [anchor, setAnchor] = useState<string>(() => {
+    const p = loadPin();
+    return p ? `якорь h=${p.height} ${p.blockHash.slice(0, 10)}…` : "якорь не закреплён";
+  });
+  const [anchorAlert, setAnchorAlert] = useState<string>("");
   const [rpcUrl, setRpcUrl] = useState(() => localStorage.getItem("aegis.rpc") || "");
   const [backup, setBackup] = useState("");
   const [backupInput, setBackupInput] = useState("");
@@ -169,6 +176,15 @@ export default function App() {
       const r = await fetch(rpc, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "aeg_getBalance", params: [address] }) });
       const j = await r.json();
       setBalance(j.result != null ? String(j.result) : "err: " + j.error?.message);
+      // v1.14: сверяем подписанный чекпоинт с закреплённым — ловим rollback/fork
+      try {
+        const cr = await fetch(rpc, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "aeg_checkpointLatest", params: [] }) });
+        const cj = await cr.json();
+        const a = checkAnchor(cj.result?.checkpoint);
+        setAnchor(a.text);
+        setAnchorAlert(a.alert ?? "");
+        if (a.verdict === "fork" || a.verdict === "rollback") showToast(lang === "ru" ? "⚠ узел показал другую историю" : "⚠ node served a different history");
+      } catch { /* checkpoint optional */ }
     } catch (e: any) { setBalance("err: " + e.message); }
   }
 
@@ -288,7 +304,7 @@ export default function App() {
   return (
     <div className="app">
       <div className="hero">
-        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.13</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span>
+        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.14</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span>
           <button className="secondary" style={{ width: "auto", padding: "6px 10px", marginLeft: 6 }} onClick={() => { const nl = lang === "ru" ? "en" : "ru"; setLang(nl); localStorage.setItem("aegis.lang", nl); }}>{lang === "ru" ? "EN" : "RU"}</button></div>
         <h1>Щит Афины.<br />Ключи — в железе, намерение — на экране.</h1>
         <p>Hybrid Ed25519 + ML-DSA-65 · Intent-Bound · Offline Mesh. Агент не подпишет за тебя: нужны Passkey + живой человек + домен.</p>
@@ -306,6 +322,7 @@ export default function App() {
           <span className="badge">баланс <b className="mono">{balance}</b></span>
           <button className="secondary btn" style={{ padding: "8px 10px" }} onClick={checkBalance}>обновить</button>
         </div>
+        <div className="hint" style={{ marginTop: 8 }}>{anchor} {anchorAlert ? <span className="warn">· {anchorAlert}</span> : null}</div>
         <div className="hint" style={{ marginTop: 8 }}>{status}</div>
         <div className="grid" style={{ marginTop: 10 }}>
           <button className="btn" onClick={onCreate}>Создать Passkey + кошелёк</button>

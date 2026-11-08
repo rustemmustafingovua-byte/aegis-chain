@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<meta name="description" content="AEGIS Explorer — живой узел v1.13. Постквантовый hybrid-блокчейн, устойчивый к взлому и ИИ-агентам."/>
+<meta name="description" content="AEGIS Explorer — живой узел v1.14. Постквантовый hybrid-блокчейн, устойчивый к взлому и ИИ-агентам."/>
 <meta name="theme-color" content="#0b0e1a"/>
-<title>AEGIS Explorer — живой узел v1.13</title>
+<title>AEGIS Explorer — живой узел v1.14</title>
 <style>
 :root{
   --bg:#0b0e1a; --bg2:#0f132e; --card:#11162e; --card2:#161c3d;
@@ -78,7 +78,7 @@ footer{color:var(--mut);font-size:13px;margin-top:18px}
       <b style="font-size:17px">🛡️ AEGIS <span style="color:var(--cyan)">Explorer</span></b>
       <div class="row">
         <span class="badge" id="height">height …</span>
-        <span class="badge">v1.13</span>
+        <span class="badge">v1.14</span>
         <span class="badge" id="netstat">● live</span>
       </div>
     </div>
@@ -222,6 +222,14 @@ footer{color:var(--mut);font-size:13px;margin-top:18px}
       <div class="row" style="margin-top:10px"><button onclick="lightSync()">синхронизировать и проверить</button><span id="lightMeta" class="mono"></span></div>
       <div class="hr"></div>
       <div id="lightOut" class="hint">— нажми «синхронизировать»</div>
+      <div class="hr"></div>
+      <h3>🔒 Nullifier: «потрачено / не потрачено» без доверия узлу</h3>
+      <div class="hint">Офлайн-пакет приносит nullifier = H(ключ‖nonce). Докажем по подписанному чекпоинту, что он ещё не потрачен (non-inclusion), — путь Меркла пересчитывается ниже, в браузере.</div>
+      <div class="row" style="margin-top:8px">
+        <input id="nullInput" placeholder="nullifier (hex)" style="flex:1"/>
+        <button onclick="checkNullifier()">проверить</button>
+      </div>
+      <div id="nullOut" class="hint" style="margin-top:8px">—</div>
     </div>
   </div>
 
@@ -242,7 +250,7 @@ footer{color:var(--mut);font-size:13px;margin-top:18px}
     </div>
   </div>
 
-  <footer>AEGIS v1.13 — постквантовый trust layer. Не финансовая рекомендация. Кошелёк: <span class="mono">wallet-mobile/</span> · Доки: <span class="mono">docs/</span> · Аудит: <span class="mono">SECURITY.md</span></footer>
+  <footer>AEGIS v1.14 — постквантовый trust layer. Не финансовая рекомендация. Кошелёк: <span class="mono">wallet-mobile/</span> · Доки: <span class="mono">docs/</span> · Аудит: <span class="mono">SECURITY.md</span></footer>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -337,13 +345,79 @@ async function lightSync(){
     if(r==='ok') okCount++; else if(r==='ed25519-unavailable') unsupported=true; else failCount++;
   }
   const cpOk=ver&&ver.ok;
+  // v1.14: checkpoint pinning — локальный якорь ловит откат/форк истории
+  let pinMsg='';
+  try{
+    const prev=JSON.parse(localStorage.getItem('aegis.pin')||'null');
+    if(!prev){
+      localStorage.setItem('aegis.pin', JSON.stringify({height:cp.height, blockHash:cp.blockHash, stateRoot:cp.stateRoot}));
+      pinMsg='<span class="ok">✓ якорь закреплён в браузере (h='+cp.height+')</span>';
+    } else if(cp.height===prev.height && cp.blockHash!==prev.blockHash){
+      pinMsg='<span class="warn">✗ FORK: узел дал другой blockHash на высоте '+cp.height+' (пин '+prev.blockHash.slice(0,12)+'…)</span>';
+    } else if(cp.height<prev.height){
+      pinMsg='<span class="warn">✗ ROLLBACK: закреплено h='+prev.height+', узел дал h='+cp.height+'</span>';
+    } else {
+      if(cp.height>prev.height) localStorage.setItem('aegis.pin', JSON.stringify({height:cp.height, blockHash:cp.blockHash, stateRoot:cp.stateRoot}));
+      pinMsg='<span class="ok">✓ пин совместим (закреплено h='+Math.max(prev.height,cp.height)+')</span>';
+    }
+  }catch(e){ pinMsg='<span class="hint">localStorage недоступен</span>'; }
   document.getElementById('lightMeta').textContent=`checkpoint h=${cp.height} · signers ${ver?ver.signers.length:0} · stake ${ver?ver.signedBps/100:0}%`;
   out.innerHTML =
     `${cpOk?'<span class="ok">✓ чекпоинт подписан ≥2/3 стейка</span>':'<span class="warn">✗ чекпоинт без кворума</span>'} · root <span class="mono">${cp.stateRoot.slice(0,20)}…</span><br>`+
     `${linkOk?'<span class="ok">✓ первый заголовок совпадает с blockHash чекпоинта</span>':'<span class="warn">✗ заголовок не совпадает с чекпоинтом</span>'}<br>`+
     `${heightOk?'<span class="ok">✓ '+hs.length+' заголовков связаны height/prevHash</span>':'<span class="warn">✗ разрыв в цепочке заголовков</span>'}<br>`+
     `${failCount===0&&!unsupported ? '<span class="ok">✓ Ed25519-подписи и хеши пересчитаны в браузере ('+okCount+')</span>' : (unsupported?'<span class="warn">⚠ Ed25519 WebCrypto недоступен в этом браузере</span>':'<span class="warn">✗ '+failCount+' плохих подписей/хешей</span>')}<br>`+
+    `${pinMsg}<br>`+
     `<span class="hint">ML-DSA-65 подпись проверена узлом (браузер пока не умеет) — это ограничение модели, а не скрытый trust.</span>`;
+}
+
+// ---- v1.14: nullifier inclusion / non-inclusion, проверка в браузере ----
+async function verifyNonInclusionLocal(p){
+  const EMPTY='aegis-nullifiers-empty/v1';
+  const emptyRoot=u8ToHex(await h256(new TextEncoder().encode(EMPTY)));
+  const target='nullifier:'+p.nullifier.toLowerCase();
+  if(!p.left && !p.right) return {ok:p.root===emptyRoot, reason:p.root===emptyRoot?'':'empty proof for non-empty tree'};
+  for(const side of ['left','right']){
+    const s=p[side]; if(!s) continue;
+    if(s.proof.leaf!==s.leaf) return {ok:false, reason:side+' leaf mismatch'};
+    if(s.proof.root!==p.root) return {ok:false, reason:side+' root mismatch'};
+    if(!(await verifyStateProof(s.proof))) return {ok:false, reason:side+' merkle path invalid'};
+  }
+  if(p.left && !(p.left.leaf<target)) return {ok:false, reason:'left neighbour is not smaller'};
+  if(p.right && !(target<p.right.leaf)) return {ok:false, reason:'right neighbour is not larger'};
+  if(p.left && p.right && p.right.proof.index!==p.left.proof.index+1) return {ok:false, reason:'neighbours are not adjacent'};
+  return {ok:true};
+}
+async function checkNullifier(){
+  const out=document.getElementById('nullOut');
+  const n=document.getElementById('nullInput').value.trim();
+  if(!n){out.textContent='введи nullifier';return;}
+  out.textContent='проверка…';
+  const j=await rpc('aeg_isNullifierSpent',[n]);
+  if(j.error){out.innerHTML='<span class="warn">ошибка: '+j.error.message+'</span>';return;}
+  const r=j.result, p=r.proof;
+  let local, anchorMsg='';
+  try{
+    if(p.type==='inclusion'){
+      local = {ok: p.proof.leaf==='nullifier:'+n.toLowerCase() && await verifyStateProof(p.proof), reason:'leaf/path'};
+    } else {
+      local = await verifyNonInclusionLocal(p);
+    }
+  }catch(e){ local={ok:false, reason:e.message}; }
+  const cpj=await rpc('aeg_checkpointLatest');
+  const anchorRoot=cpj.result?.checkpoint?.nullifierRoot;
+  if(anchorRoot){
+    anchorMsg = anchorRoot===p.root
+      ? '<span class="ok">✓ root совпадает с подписанным чекпоинтом h='+cpj.result.checkpoint.height+'</span>'
+      : '<span class="warn">✗ root не совпадает с чекпоинтом — proof устарел или подменён</span>';
+  } else {
+    anchorMsg = '<span class="warn">чекпоинта нет — сверять не с чем</span>';
+  }
+  out.innerHTML =
+    `${r.spent?'<span class="warn">● потрачен (inclusion)</span>':'<span class="ok">● не потрачен (non-inclusion)</span>'} · `+
+    `${local.ok?'<span class="ok">✓ proof пересчитан в браузере</span>':'<span class="warn">✗ '+local.reason+'</span>'}<br>`+
+    `${anchorMsg}<br>`+
+    `<span class="hint">root ${p.root.slice(0,24)}… · узлу не доверяем: сравниваем с подписью валидаторов</span>`;
 }
 
 async function refresh(){

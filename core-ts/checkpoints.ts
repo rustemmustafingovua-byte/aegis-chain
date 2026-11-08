@@ -21,27 +21,34 @@ import type { HeaderView } from "./headers.js";
 
 export type CheckpointSignature = { validator: string; sig: HybridSignature };
 export type Checkpoint = {
+  /** v2 (v1.14): adds nullifierRoot so offline "not spent" proofs can be anchored. */
+  version: 2;
   height: number;
   stateRoot: string;
+  nullifierRoot: string;
   blockHash: string;
   timestamp: number;
   signatures: CheckpointSignature[];
 };
 
-export function checkpointMessage(cp: Pick<Checkpoint, "height" | "stateRoot" | "blockHash" | "timestamp">): Buffer {
-  return Buffer.from(["aegis-checkpoint/v1", cp.height, cp.stateRoot, cp.blockHash, cp.timestamp].join("|"));
+export function checkpointMessage(
+  cp: Pick<Checkpoint, "height" | "stateRoot" | "nullifierRoot" | "blockHash" | "timestamp">,
+): Buffer {
+  return Buffer.from(["aegis-checkpoint/v2", cp.height, cp.stateRoot, cp.nullifierRoot, cp.blockHash, cp.timestamp].join("|"));
 }
 
 export type CheckpointSource = {
   height: number;
-  ledger: { stateRoot(): string };
+  ledger: { stateRoot(): string; nullifierRoot(): string };
   head?: { hash: string };
 };
 
 export function createCheckpoint(chain: CheckpointSource, keys: HybridKeypair): Checkpoint {
   const cp: Checkpoint = {
+    version: 2,
     height: chain.height,
     stateRoot: chain.ledger.stateRoot(),
+    nullifierRoot: chain.ledger.nullifierRoot(),
     blockHash: chain.head?.hash ?? "0".repeat(64),
     timestamp: Date.now(),
     signatures: [],
@@ -75,6 +82,9 @@ export type CheckpointVerification = {
  * trusts (from genesis config or a previous verified checkpoint).
  */
 export function verifyCheckpoint(cp: Checkpoint, validators: HeaderView, thresholdBps = 6667): CheckpointVerification {
+  if ((cp as any).version !== 2) {
+    return { ok: false, signedStake: "0", totalStake: "0", signedBps: 0, thresholdBps, signers: [], reason: `unsupported checkpoint version ${(cp as any).version}` };
+  }
   const totalStake = [...validators.values()].reduce((a, v) => a + v.stake, 0n);
   const msg = checkpointMessage(cp);
   let signedStake = 0n;
@@ -109,6 +119,9 @@ export class CheckpointStore {
   keep = 256;
 
   add(cp: Checkpoint): void {
+    // only v2 checkpoints commit the nullifier set; storing others would make
+    // offline proofs unverifiable against the anchor they appear to provide
+    if ((cp as any).version !== 2) return;
     const existing = this.map.get(cp.height);
     // merge signatures for the same height (multi-validator co-signing)
     // Merge only for the identical signed message. A different timestamp is a different
@@ -140,7 +153,9 @@ export class CheckpointStore {
     const st = new CheckpointStore();
     if (j?.keep) st.keep = j.keep;
     for (const cp of j?.checkpoints ?? []) {
-      try { if (typeof cp.height === "number") st.map.set(cp.height, cp); } catch { /* skip */ }
+      // migration: v1 checkpoints did not commit the nullifier set, so they cannot
+      // anchor offline (non-)inclusion proofs — drop them instead of pretending.
+      try { if (typeof cp.height === "number" && cp.version === 2) st.map.set(cp.height, cp); } catch { /* skip */ }
     }
     return st;
   }

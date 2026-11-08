@@ -29,6 +29,14 @@ python3 demo.py        # демо: нормальный юзер проходи�
 python3 -m pytest test_aegis.py -v   # тесты
 ```
 
+### v1.14 — Offline trust: nullifier proofs и защита от отката (сделано)
+- **Nullifier-обязательство** в `stateRoot`; checkpoint v2 подписывает `nullifierRoot`
+- **Non-inclusion proofs**: «этот офлайн-пакет ещё не потрачен» доказывается по подписанному
+  checkpoint, без полного узла; explorer проверяет путь Меркла в браузере
+- **Pinning**: кошелёк и explorer закрепляют последний проверенный checkpoint и ловят
+  **rollback** (узел откатил высоту) и **fork** (другая история на той же высоте)
+- Миграция: v1-checkpoint'ы без `nullifierRoot` не принимаются
+
 ### v1.13 — Light client, checkpoints и durable WAL (сделано)
 - **Checkpoints**: `stateRoot + blockHash` подписаны гибридно (Ed25519 + ML-DSA-65), порог ≥2/3
   стейка, авто каждые N блоков, `aeg_checkpointLatest|getCheckpoints|checkpointSign`
@@ -44,7 +52,7 @@ python3 -m pytest test_aegis.py -v   # тесты
 ```bash
 cd ~/workspace/workspace/aegis-chain
 npm install
-npm test               # 66 passing: hybrid, Chain, Shamir, Mesh, P2P, RPC, AMM, Governance, Bridge, security, fee market, Merkle proofs, WebAuthn/Passkey, signed checkpoints, header sync, WAL replay + 31 forge tests
+npm test               # 79 passing: hybrid, Chain, Shamir, Mesh, P2P, RPC, AMM, Governance, Bridge, security, fee market, Merkle proofs, WebAuthn/Passkey, signed checkpoints, header sync, WAL replay + 31 forge tests
 npm run demo           # Ed25519+ML-DSA-65, intent, offline mesh, PoS block
 npm run build          # tsc → dist/
 npm run serve          # :8899 RPC+Explorer, :3899 TCP + :4899 libp2p Noise (живой узел, WAL + checkpoints)
@@ -77,7 +85,7 @@ npm run build          # 310KB gzip 102KB — PWA manifest + icon
 # iPhone/Android: создай Passkey (Touch/Face ID), кошелёк шифруется им
 ```
 
-## Полная инфраструктура (v1.13)
+## Полная инфраструктура (v1.14)
 
 | Компонент | Где | Запуск |
 |---|---|---|
@@ -94,6 +102,8 @@ npm run build          # 310KB gzip 102KB — PWA manifest + icon
 | **Header sync** цепочка заголовков + VRF-проверка пропозера | `core-ts/headers.ts` | `aeg_getHeaders` / `aeg_verifyHeaders` |
 | **Tx inclusion proof** против `header.merkleRoot` | `core-ts/rpc.ts` (`aeg_getTxProof`) | `POST /api/rpc` |
 | **WAL durability** append-only лог + replay с терпимостью к torn tail | `core-ts/wal.ts`, `docs/WAL.md` | авто |
+| **Nullifier proofs** inclusion/non-inclusion по подписанному checkpoint | `core-ts/nullifiers.ts`, `docs/LIGHT_CLIENT.md` | `aeg_isNullifierSpent` |
+| **Checkpoint pinning** rollback/fork detection в кошельке и explorer | `core-ts/pinning.ts`, `wallet-mobile/src/lib/pin.ts` | авто |
 | **Passkey server** WebAuthn registration/assertion, TOFU key binding | `core-ts/webauthn.ts`, `docs/PASSKEY.md` | авто |
 | **Keeper** конвертер без биржи (AMM x*y=k 0.3%) | `keeper/keeper.ts` | `npm run keeper` |
 | **Контракты Base** ERC-20 + AMM + Staking + Governance + Multisig | `contracts/` | `forge create` |

@@ -22,6 +22,7 @@ import { VERSION } from "./version.js";
 import { WAL_SNAPSHOT_EVERY } from "./wal.js";
 import { headerFromBlock, validatorViewOf, verifyHeaderChain } from "./headers.js";
 import { CheckpointStore, createCheckpoint, verifyCheckpoint } from "./checkpoints.js";
+import { verifyNullifierProof, type NullifierProof } from "./nullifiers.js";
 
 type RpcRequest = { jsonrpc: string; id: number | string; method: string; params: any[] };
 type RpcResponse = { jsonrpc: "2.0"; id: number | string; result?: unknown; error?: { code: number; message: string } };
@@ -91,6 +92,7 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
         mempool: chain.mempool.size,
         supply: chain.ledger.totalSupply().toString(),
         stateRoot: chain.ledger.stateRoot(),
+        nullifierRoot: chain.ledger.nullifierRoot(),
         baseFee: chain.feeMarket.baseFee.toString(),
         suggestedFee: chain.feeMarket.suggest().toString(),
         version: VERSION,
@@ -99,7 +101,10 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
           const cp = deps.checkpoints?.latest();
           if (!cp) return null;
           const v = verifyCheckpoint(cp, validatorViewOf(chain));
-          return { height: cp.height, stateRoot: cp.stateRoot, signedBps: v.signedBps, signers: v.signers.length };
+          return {
+            height: cp.height, stateRoot: cp.stateRoot, nullifierRoot: cp.nullifierRoot,
+            signedBps: v.signedBps, signers: v.signers.length,
+          };
         })(),
         validators: [...chain.validators.values()].map((v) => ({ edPublic: v.publicKey.slice(0, 20) + "…", stake: v.stake.toString(), address: v.address ?? null })),
         accounts: [...chain.ledger.accounts.entries()].map(([addr, a]) => ({ addr, balance: a.balance.toString(), stake: a.stake.toString(), nonce: a.nonce, humanityScore: a.humanityScore ?? null })),
@@ -144,7 +149,11 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
 
   function dispatch(method: string, params: any[]) {
     switch (method) {
-      case "aeg_getState": return { height: chain.height, head: chain.head?.hash ?? null, supply: chain.ledger.totalSupply().toString(), stateRoot: chain.ledger.stateRoot() };
+      case "aeg_getState": return {
+        height: chain.height, head: chain.head?.hash ?? null,
+        supply: chain.ledger.totalSupply().toString(),
+        stateRoot: chain.ledger.stateRoot(), nullifierRoot: chain.ledger.nullifierRoot(),
+      };
       case "aeg_getBlock": {
         const h = params[0] as number;
         const b = chain.blocks.find((x) => x.header.height === h);
@@ -198,7 +207,8 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
         // gossip to peers if attached (dual transport)
         try { deps.p2p?.gossipTx(tx); } catch {}
         try { (deps as any).libp2p?.gossipTx(tx); } catch {}
-        return { accepted: true, mempool: chain.mempool.size, txHash: chain.ledger.stateRoot().slice(0, 16) };
+        // real tx id (message hash), not the state root — wallets show this in history
+        return { accepted: true, mempool: chain.mempool.size, txHash: sha256Hex(Buffer.from(stringify(tx))).slice(0, 16) };
       }
       case "aeg_swapQuote": {
         const [key, amount] = [params[0] as string, params[1]];
@@ -349,6 +359,22 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
       case "aeg_getCheckpoints": {
         if (!deps.checkpoints) return [];
         return deps.checkpoints.list(Number(params[0] ?? 0), Math.min(Number(params[1] ?? 50), 200));
+      }
+      // ---- v1.14: nullifier (non-)inclusion — офлайн-проверка «не потрачено» ----
+      case "aeg_getNullifierRoot": return { height: chain.height, nullifierRoot: chain.ledger.nullifierRoot() };
+      case "aeg_isNullifierSpent": {
+        const nullifier = String(params[0] ?? "");
+        if (!nullifier) throw new Error("nullifier required");
+        const proof = chain.ledger.nullifierProof(nullifier);
+        const check = verifyNullifierProof(proof);
+        const cp = deps.checkpoints?.latest() ?? null;
+        return {
+          nullifier, spent: chain.ledger.spentNullifiers.has(nullifier) || chain.ledger.spentNullifiers.has(nullifier.toLowerCase()),
+          proof, verified: check.ok,
+          // what a light client should compare against: the latest signed checkpoint
+          anchor: cp ? { height: cp.height, nullifierRoot: cp.nullifierRoot } : null,
+          reason: check.ok ? undefined : (check as any).reason,
+        };
       }
       case "aeg_checkpointSign": {
         if (!deps.checkpoints || !deps.validator) throw new Error("checkpoint signing not configured");

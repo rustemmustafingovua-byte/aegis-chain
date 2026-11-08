@@ -1,4 +1,4 @@
-# Light Client, State Proofs & Header Sync (v1.13)
+# Light Client, State Proofs, Header Sync & Nullifiers (v1.14)
 
 ## Проблема доверия
 
@@ -14,6 +14,8 @@
 | 2. Tx proof | транзакция входит в `header.merkleRoot` | клиент сам | v1.13 |
 | 3. Header sync | цепочка заголовков от якоря | клиент сам | v1.13 |
 | 4. Checkpoint | `stateRoot` подписан ≥2/3 стейка | клиент сам | v1.13 |
+| 5. Nullifier | «не потрачено» по `nullifierRoot` из checkpoint | клиент сам | v1.14 |
+| 6. Pinning | откат/форк истории относительно закреплённого якоря | клиент сам | v1.14 |
 
 ## 1. Merkle-обязательство состояния (v1.12)
 
@@ -109,6 +111,60 @@ assert.equal(proof.root, header.merkleRoot);
 assert.equal(verifyMerkleProof(proof), true);
 ```
 
+## 5. Nullifier: «потрачено / не потрачено» без полного узла (v1.14)
+
+Офлайн-платёж в mesh несёт `nullifier = H(ключ ‖ nonce)`. Получатель офлайн не может
+спросить сеть, потрачен ли он, но может проверить это по **подписанному checkpoint**.
+
+Дерево nullifier'ов:
+
+```
+leaf = "nullifier:<hex в нижнем регистре>", листья отсортированы лексикографически
+nullifierRoot = merkleRoot(leaves)          // пустое множество = sha256("aegis-nullifiers-empty/v1")
+stateRoot включает лист "nullifiers:<nullifierRoot>"  // набор потрат связан с состоянием
+checkpoint v2 подписывает и nullifierRoot            // якорь для офлайн-проверки
+```
+
+Proof:
+
+- `inclusion` — nullifier в дереве ⇒ **потрачен** (платёж отклоняем);
+- `non-inclusion` — два **соседних** листа `left < n < right` (или пустое дерево);
+  проверка смежности `right.index = left.index + 1` обязательна, иначе можно
+  «доказать» отсутствие того, что на самом деле лежит между листьями.
+
+```ts
+import { verifyNullifierProof } from "./core-ts/nullifiers.js";
+const { proof } = await rpc("aeg_isNullifierSpent", [nullifier]);
+const res = verifyNullifierProof(proof, checkpoint.nullifierRoot); // компарация с подписью!
+// res.ok === true, res.spent === false → можно принимать офлайн-пакет
+```
+
+RPC: `aeg_isNullifierSpent [nullifier]` → `{ spent, proof, verified, anchor }`,
+`aeg_getNullifierRoot` → текущий root. Explorer проверяет proof в браузере
+(вкладка Light client → «Nullifier»), включая сравнение с root из checkpoint.
+
+Границы: proof доказывает статус **на момент checkpoint**; трата, попавшая в сеть
+после него, в proof не видна — поэтому для крупных сумм ждём свежий checkpoint
+(или проверяем по headers + state после синка). Это стандартный trade-off
+light-client'ов, а не скрытая дыра.
+
+## 6. Pinning: откат и форк (v1.14)
+
+Клиент запоминает последний **проверенный** checkpoint (`aegis.pin` в localStorage):
+
+| Ситуация | Вердикт | Пин |
+|---|---|---|
+| первое обращение | `pin` | записан |
+| та же высота, тот же `blockHash`/`stateRoot` | `same` | не меняется |
+| выше | `advance` | обновлён |
+| ниже | `rollback` | **не понижается**, показывается предупреждение |
+| та же высота, другой `blockHash` | `fork` | **не перезаписывается** |
+
+Модуль `core-ts/pinning.ts` (чистый) + зеркало в кошельке
+(`wallet-mobile/src/lib/pin.ts`). Кошелёк при обновлении баланса сверяет
+`aeg_checkpointLatest` с пином и показывает «узел показал другую историю» при
+fork/rollback; explorer делает то же во вкладке Light client.
+
 ## Полный поток «с нуля» (fresh light client)
 
 ```
@@ -117,6 +173,8 @@ assert.equal(verifyMerkleProof(proof), true);
 3. aeg_getHeaders(N, N+k)        → verifyHeaderChain(..., {expectedPrevHash:H})
 4. aeg_getProof(addr)            → пересчитать root, сравнить с R
 5. aeg_getTxProof(h, i)          → проверить против header.merkleRoot из шага 3
+6. aeg_isNullifierSpent(n)       → verifyNullifierProof(proof, cp.nullifierRoot)
+7. assessCheckpoint(pin, cp)     → rollback/fork? не принимать новую историю
 ```
 
 Ни на одном шаге не требуется доверять полному узлу. Единственное начальное
@@ -131,5 +189,5 @@ assert.equal(verifyMerkleProof(proof), true);
 - Браузерный explorer проверяет **Ed25519 и все хеши** через WebCrypto. ML-DSA-65
   в браузере пока не проверяется (нет нативного API, WASM-сборка `@noble/post-quantum`
   в планах) — в UI это написано явно, а не замаскировано.
-- Non-inclusion proofs для nullifier'ов (доказать, что офлайн-трата ещё не потрачена)
-  — следующий шаг, см. `docs/ROADMAP.md`.
+- Proof nullifier'а актуален на момент checkpoint: трата после него не видна,
+  пока не получен новый checkpoint/headers (см. раздел 5).

@@ -69,6 +69,7 @@ function walletNew() {
  * Send a signed tx to a running node. Used by devnet demo/ops scripts.
  *   tsx cli/aegis.ts send --to=aeg1... --amount=1000 [--rpc=http://127.0.0.1:8899]
  *                        [--seed=<64 hex chars>] [--intent="..."] [--domain=aegis.local]
+ *                        [--nullifier=<hex>]  # расход офлайн-ноты: сеть запомнит nullifier
  * Без --seed берётся детерминированный devnet-ключ (тот же, что у `serve`).
  */
 async function sendCmd(args: string[]) {
@@ -84,6 +85,7 @@ async function sendCmd(args: string[]) {
   const amount = BigInt(arg("amount") ?? "1");
   const intent = arg("intent") ?? "cli transfer";
   const domain = arg("domain") ?? "aegis.local";
+  const nullifier = arg("nullifier");
   const seedArg = arg("seed");
   const seed = seedArg
     ? Buffer.from(seedArg, "hex")
@@ -112,6 +114,7 @@ async function sendCmd(args: string[]) {
     edPublicB64: kp.edPublic,
     data: "",
   };
+  if (nullifier) tx.nullifier = nullifier; // settles an offline note; the ledger records it
   const msg = new Ledger().txMessage(tx);
   tx.sig = hybridSign(kp, msg);
   const json = JSON.parse(JSON.stringify(tx, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));

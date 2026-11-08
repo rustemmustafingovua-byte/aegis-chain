@@ -7,6 +7,7 @@
 import { sha256, verify, addressFromPublicKey } from "./crypto.js";
 import { merkleRoot, merkleProof, type MerkleProof } from "./merkle.js";
 import { hybridVerify, mlPublicKeyHash } from "./hybrid.js";
+import { NULLIFIER_EMPTY_ROOT, nullifierLeaf, type NullifierProof } from "./nullifiers.js";
 import type { HybridSignature } from "./hybrid.js";
 
 export const GENESIS_SUPPLY = 1_000_000_000_000_000n; // 1e9 AEGIS, 6 decimals
@@ -17,6 +18,7 @@ export const SLASH_BPS = 1000n; // 10% slash for equivocation/double-spend
 export const REWARD_APR_BPS = 300n; // 3% per year
 export const BLOCKS_PER_YEAR = 7_884_000n; // 4s slots
 export const UNSTAKE_DELAY_BLOCKS = 100; // 400s lock
+
 
 export type Account = {
   address: string;
@@ -283,7 +285,40 @@ export class Ledger {
         parts.push(`lp:${key}:${owner}:${shares}`);
       }
     }
-    return parts;
+    // v1.14: spent-nullifier set is committed too, so a light client can prove
+    // "this offline note was not spent as of checkpoint N" (see nullifierProof).
+    parts.push(`nullifiers:${this.nullifierRoot()}`);
+    return parts.sort();
+  }
+  /** Sorted nullifier leaves (v1.14) — canonical order is lexicographic on the leaf string. */
+  nullifierLeaves(): string[] {
+    return [...this.spentNullifiers].map((n) => nullifierLeaf(n)).sort();
+  }
+  /**
+   * Merkle root of the spent-nullifier set. Anchored in stateRoot (leaf `nullifiers:<root>`)
+   * and in v1.14 checkpoints, so proofs can be checked against a signed commitment.
+   */
+  nullifierRoot(): string {
+    const leaves = this.nullifierLeaves();
+    return leaves.length ? merkleRoot(leaves) : NULLIFIER_EMPTY_ROOT;
+  }
+  /** Inclusion (spent) or non-inclusion (unspent) proof for a nullifier. */
+  nullifierProof(nullifier: string): NullifierProof {
+    const n = nullifier.toLowerCase();
+    const leaves = this.nullifierLeaves();
+    const root = leaves.length ? merkleRoot(leaves) : NULLIFIER_EMPTY_ROOT;
+    if (this.spentNullifiers.has(nullifier) || this.spentNullifiers.has(n)) {
+      const leaf = nullifierLeaf(n);
+      const idx = leaves.indexOf(leaf);
+      if (idx < 0) throw new LedgerError("nullifier marked spent but missing from the tree");
+      return { type: "inclusion", nullifier: n, root, proof: merkleProof(leaves, idx) };
+    }
+    // non-inclusion: bracket n between two adjacent leaves (or prove an empty tree)
+    let idx = 0;
+    while (idx < leaves.length && leaves[idx] < nullifierLeaf(n)) idx++;
+    const left = idx > 0 ? { leaf: leaves[idx - 1], proof: merkleProof(leaves, idx - 1) } : null;
+    const right = idx < leaves.length ? { leaf: leaves[idx], proof: merkleProof(leaves, idx) } : null;
+    return { type: "non-inclusion", nullifier: n, root, left, right };
   }
   /**
    * v1.12: state root = domain-separated Merkle root over sorted leaves.

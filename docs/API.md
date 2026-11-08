@@ -1,4 +1,4 @@
-# AEGIS API — RPC и REST (v1.13)
+# AEGIS API — RPC и REST (v1.14)
 
 База: `POST /api/rpc` (JSON-RPC 2.0), `GET /api/state`, `GET /health`, `/` — explorer static.
 
@@ -43,7 +43,9 @@ curl http://127.0.0.1:8899/api/rpc -X POST -H 'Content-Type: application/json' \
 | `aeg_validatorSet` | `[]` | edPublic, publicKey, mlPublicKeyB64, stake, address (v1.13) |
 | `aeg_checkpointLatest` | `[]` | `{ checkpoint, verification }` или `null` (v1.13) |
 | `aeg_getCheckpoints` | `[from=0, limit=50]` | история checkpoints, limit ≤200 (v1.13) |
-| `aeg_checkpointSign` | `[]` | admin: подписать свой checkpoint (v1.13) |
+| `aeg_checkpointSign` | `[]` | admin: подписать свой checkpoint, персистится (v1.13) |
+| `aeg_getNullifierRoot` | `[]` | `{ height, nullifierRoot }` (v1.14) |
+| `aeg_isNullifierSpent` | `[nullifier]` | `{ spent, proof, verified, anchor }` — inclusion/non-inclusion (v1.14) |
 
 Tx формат (см. `core-ts/ledger.ts` Tx): `from, to?, amount (bigint→string в JSON), fee, nonce, intent (обязательно), domain (обязательно), timestamp, sig{edSig,mlSig,hybrid}, mlPublicKeyB64, edPublicB64? (обязателен при первой трате — TOFU binding), nullifier?, data?` (`stake:|unstake:|unlock:|swap:|addliq:`).
 
@@ -69,8 +71,18 @@ curl -s localhost:8899/api/rpc -H 'Content-Type: application/json' \
 # → { tx, proof, header, blockHash }
 ```
 
+Nullifier (v1.14):
+
+```bash
+curl -s localhost:8899/api/rpc -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":4,"method":"aeg_isNullifierSpent","params":["<hex>"]}'
+# → { spent:false, proof:{type:"non-inclusion", root, left, right}, verified:true,
+#     anchor:{height, nullifierRoot} }   — сверяй proof.root с anchor.nullifierRoot
+```
+
 Полный поток проверки — `docs/LIGHT_CLIENT.md`. `GET /api/state` включает
-`checkpoint: { height, stateRoot, signedBps, signers }` для дашбордов.
+`checkpoint: { height, stateRoot, nullifierRoot, signedBps, signers }` и `nullifierRoot`
+для дашбордов.
 
 ## Ошибки
 
