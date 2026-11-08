@@ -28,10 +28,11 @@ jobs:
           export PATH="$HOME/.foundry/bin:$HOME/.config/.foundry/bin:$PATH"
           foundryup
           cd contracts && forge test -vv
-      - name: Wallet build
+      - name: Wallet build + tests
         run: |
           cd wallet-mobile
           npm ci
+          npm test
           npm run build
       - name: Slither (contracts)
         run: |

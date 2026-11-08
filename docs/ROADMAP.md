@@ -32,9 +32,22 @@
 - Миграция: checkpoint v1 (без nullifierRoot) не принимается store'ом — честный отказ вместо
   ложного якоря
 
+## v1.15 — Кошелёк проверяет себя сам (сделано)
+- **Trustless balance в кошельке**: `wallet-mobile/src/lib/light.ts` — checkpoint
+  (Ed25519 + ML-DSA-65, порог 2/3), заголовки от якоря `cp.height+1`, VRF-пропозер,
+  Merkle proof против `cp.stateRoot`; кнопка «✓ проверить без доверия»
+- **Честная деградация**: устаревший checkpoint → «баланс не подтверждён», а не
+  «наверное, верный»; заголовки проверяются независимо от свежести состояния
+- **Совместимость кошелька и ядра**: `hybrid = sha256(base64(edSig) ‖ base64(mlSig))` —
+  раньше кошелёк хешировал hex-подпись, и узел отклонял **каждую** его транзакцию
+  (`bad hybrid sig`); кросс-тесты `wallet-mobile/test/compat.test.ts`
+- **noble v2 SHA-512**: `noble-setup.ts` ставит `ed.etc.sha512Sync` — без него
+  `getPublicKey/sign/verify` падают в браузере и в node
+- CI: `cd wallet-mobile && npm ci && npm test && npm run build`
+
 ## v1.4 — Production hardening (осталось)
 - Slither cleanup в CI + external audit (Trail of Bits/Zellic), bug bounty escrow
-- gossipsub для блоков (topic уже есть), checkpoint pinning в кошельке/explorer
+- gossipsub для блоков (topic уже есть; применяем блоки от пиров, не только ретранслируем)
 - Expo native passkey + BLE mesh sync, push-нотификации
 - Prometheus/Grafana манифесты, Base Sepolia deploy контрактов
 - Nullifier-дерево: инкрементальный (sparse) update вместо пересборки на каждый блок

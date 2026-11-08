@@ -29,6 +29,20 @@ python3 demo.py        # демо: нормальный юзер проходи�
 python3 -m pytest test_aegis.py -v   # тесты
 ```
 
+### v1.15 — Кошелёк проверяет баланс сам: checkpoint + PQ в браузере (сделано)
+- **Trustless balance**: кнопка «✓ проверить без доверия» в кошельке прогоняет
+  `aeg_validatorSet → aeg_checkpointLatest → aeg_getHeaders(cp.height+1…) → aeg_getProof`
+  и пересчитывает Merkle-путь **в браузере**; ML-DSA-65 проверяется локально
+  (`@noble/post-quantum`), а не узлом
+- **Честная деградация**: устаревший checkpoint → «баланс не подтверждён», заголовки
+  при этом всё равно проверяются (непрерывность истории доказана)
+- **Исправлена критическая несовместимость**: кошелёк считал
+  `hybrid = sha256(hex(edSig) ‖ base64(mlSig))`, ядро — `sha256(base64 ‖ base64)`,
+  поэтому **каждая** транзакция из кошелька отклонялась с `bad hybrid sig`
+- **noble v2**: `lib/noble-setup.ts` ставит `ed.etc.sha512Sync` (без него
+  `getPublicKey/sign/verify` падают и в браузере, и в node)
+- **Тесты кошелька** в CI: `npm test` внутри `wallet-mobile/` (8 тестов)
+
 ### v1.14 — Offline trust: nullifier proofs и защита от отката (сделано)
 - **Nullifier-обязательство** в `stateRoot`; checkpoint v2 подписывает `nullifierRoot`
 - **Non-inclusion proofs**: «этот офлайн-пакет ещё не потрачен» доказывается по подписанному
@@ -52,7 +66,7 @@ python3 -m pytest test_aegis.py -v   # тесты
 ```bash
 cd ~/workspace/workspace/aegis-chain
 npm install
-npm test               # 79 passing: hybrid, Chain, Shamir, Mesh, P2P, RPC, AMM, Governance, Bridge, security, fee market, Merkle proofs, WebAuthn/Passkey, signed checkpoints, header sync, WAL replay + 31 forge tests
+npm test               # 79 passing (ядро) + 8 в wallet-mobile + 31 forge: hybrid, Chain, Shamir, Mesh, P2P, RPC, AMM, Governance, Bridge, security, fee market, Merkle proofs, WebAuthn/Passkey, signed checkpoints, header sync, nullifier proofs, WAL replay, light-client
 npm run demo           # Ed25519+ML-DSA-65, intent, offline mesh, PoS block
 npm run build          # tsc → dist/
 npm run serve          # :8899 RPC+Explorer, :3899 TCP + :4899 libp2p Noise (живой узел, WAL + checkpoints)
@@ -80,12 +94,14 @@ curl -s :8899/api/rpc -d '{"jsonrpc":"2.0","id":3,"method":"aeg_getTxProof","par
 ```bash
 cd wallet-mobile
 npm install
+npm test               # 8 тестов: совместимость подписей с ядром + light client
+npm run test:live      # e2e против живого devnet: tx из кошелька + trustless balance
 npm run dev            # → http://localhost:5188
-npm run build          # 310KB gzip 102KB — PWA manifest + icon
+npm run build          # ~334KB gzip ~109KB — PWA manifest + icon
 # iPhone/Android: создай Passkey (Touch/Face ID), кошелёк шифруется им
 ```
 
-## Полная инфраструктура (v1.14)
+## Полная инфраструктура (v1.15)
 
 | Компонент | Где | Запуск |
 |---|---|---|
@@ -104,10 +120,11 @@ npm run build          # 310KB gzip 102KB — PWA manifest + icon
 | **WAL durability** append-only лог + replay с терпимостью к torn tail | `core-ts/wal.ts`, `docs/WAL.md` | авто |
 | **Nullifier proofs** inclusion/non-inclusion по подписанному checkpoint | `core-ts/nullifiers.ts`, `docs/LIGHT_CLIENT.md` | `aeg_isNullifierSpent` |
 | **Checkpoint pinning** rollback/fork detection в кошельке и explorer | `core-ts/pinning.ts`, `wallet-mobile/src/lib/pin.ts` | авто |
+| **Wallet light client** баланс доказан целиком (checkpoint + headers + proof), ML-DSA в браузере | `wallet-mobile/src/lib/light.ts`, `docs/LIGHT_CLIENT.md` | кнопка в кошельке |
 | **Passkey server** WebAuthn registration/assertion, TOFU key binding | `core-ts/webauthn.ts`, `docs/PASSKEY.md` | авто |
 | **Keeper** конвертер без биржи (AMM x*y=k 0.3%) | `keeper/keeper.ts` | `npm run keeper` |
 | **Контракты Base** ERC-20 + AMM + Staking + Governance + Multisig | `contracts/` | `forge create` |
-| **Mobile Wallet** Passkey, Shamir 3-of-5 backup, QR, history, shield | `wallet-mobile/` | `npm run dev` |
+| **Mobile Wallet** Passkey, Shamir 3-of-5, trustless balance, QR, history, shield | `wallet-mobile/` | `npm run dev` |
 | **CI/CD** GH Actions (slither, wallet), Docker hardened, keepalive | `.github/workflows/ci.yml`, `scripts/`, `Dockerfile` | — |
 
 Документация: `docs/FEE.md`, `docs/LIGHT_CLIENT.md`, `docs/WAL.md`, `docs/PASSKEY.md`, `docs/PROD.md`, `docs/DESIGN.md`, `docs/SDK.md`, `docs/TUTORIAL.md`, `docs/TOKENOMICS.md`, `docs/ROADMAP.md`, `docs/API.md`, `docs/OPS.md`, `docs/THREAT_MODEL.md`, `docs/INFRA.md`, `docs/MESH.md`, `docs/MOBILE.md`, `ARCHITECTURE.md`

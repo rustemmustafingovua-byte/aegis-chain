@@ -6,6 +6,7 @@ import { splitSecret, recoverSecret, backupJson, parseBackup, secretFingerprint 
 import { bleSupported, bleScanAndRead } from "./lib/ble";
 import { toConfIntent } from "./lib/confidential";
 import { checkAnchor, loadPin } from "./lib/pin";
+import { lightBalance, type LightCheck } from "./lib/light";
 
 type Stored = { iv: string; ct: string; credentialId: string; address: string; protection?: "prf" | "device" };
 type TxItem = { hash: string; to: string; amount: string; intent: string; verdict: string; score: number; ts: number };
@@ -44,6 +45,9 @@ export default function App() {
     return p ? `якорь h=${p.height} ${p.blockHash.slice(0, 10)}…` : "якорь не закреплён";
   });
   const [anchorAlert, setAnchorAlert] = useState<string>("");
+  // v1.15: trustless balance — всё проверяется в браузере, включая ML-DSA
+  const [light, setLight] = useState<{ verified: boolean; checks: LightCheck[]; alerts: string[]; reason?: string } | null>(null);
+  const [lightBusy, setLightBusy] = useState(false);
   const [rpcUrl, setRpcUrl] = useState(() => localStorage.getItem("aegis.rpc") || "");
   const [backup, setBackup] = useState("");
   const [backupInput, setBackupInput] = useState("");
@@ -190,6 +194,23 @@ export default function App() {
 
   function saveRpc() { localStorage.setItem("aegis.rpc", rpcUrl); showToast("RPC сохранён"); }
 
+  async function verifyBalanceLight() {
+    if (!address) return;
+    setLightBusy(true);
+    try {
+      const res = await lightBalance(async (m, p) => {
+        const j = await rpcCall(m, p);
+        if (j.error) throw new Error(j.error.message);
+        return j.result;
+      }, address);
+      setLight({ verified: res.verified, checks: res.checks, alerts: res.alerts, reason: res.reason });
+      if (res.verified && res.balance != null) setBalance(res.balance);
+      showToast(res.verified ? t("Баланс подтверждён без доверия узлу", "Balance verified without trusting the node") : t("Баланс НЕ подтверждён", "Balance NOT verified"));
+    } catch (e: any) {
+      setLight({ verified: false, checks: [], alerts: [], reason: e.message });
+    } finally { setLightBusy(false); }
+  }
+
   function onBackup() {
     if (!keys) return setStatus("Сначала разблокируй для бэкапа");
     // split edPrivate (32 bytes) 3-of-5
@@ -304,7 +325,7 @@ export default function App() {
   return (
     <div className="app">
       <div className="hero">
-        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.14</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span>
+        <div className="logo"><div className="shield">🛡️</div><b>AEGIS Wallet</b><span className="badge">v1.15</span><span className="badge" style={{ background: "rgba(56,225,255,.1)" }}>Passkey</span>
           <button className="secondary" style={{ width: "auto", padding: "6px 10px", marginLeft: 6 }} onClick={() => { const nl = lang === "ru" ? "en" : "ru"; setLang(nl); localStorage.setItem("aegis.lang", nl); }}>{lang === "ru" ? "EN" : "RU"}</button></div>
         <h1>Щит Афины.<br />Ключи — в железе, намерение — на экране.</h1>
         <p>Hybrid Ed25519 + ML-DSA-65 · Intent-Bound · Offline Mesh. Агент не подпишет за тебя: нужны Passkey + живой человек + домен.</p>
@@ -322,6 +343,21 @@ export default function App() {
           <span className="badge">баланс <b className="mono">{balance}</b></span>
           <button className="secondary btn" style={{ padding: "8px 10px" }} onClick={checkBalance}>обновить</button>
         </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <button className="btn" style={{ padding: "8px 10px" }} onClick={verifyBalanceLight} disabled={lightBusy || !address}>
+            {lightBusy ? "проверяю…" : "✓ проверить без доверия (checkpoint + PQ)"}
+          </button>
+        </div>
+        {light && (
+          <div style={{ marginTop: 8, border: "1px solid var(--line)", borderRadius: 10, padding: 10 }}>
+            <div className={light.verified ? "ok" : "warn"}>
+              {light.verified ? "✓ баланс подтверждён подписанным checkpoint" : "✗ не подтверждён"}{light.reason ? ` — ${light.reason}` : ""}
+            </div>
+            {light.checks.map((c, i) => (<div key={i} className="hint">{c.ok ? "✓" : "✗"} {c.label}: {c.detail}</div>))}
+            {light.alerts.map((a, i) => (<div key={"a" + i} className="warn hint">{a}</div>))}
+            <div className="hint">ML-DSA-65 проверяется в кошельке (@noble/post-quantum), не узлом.</div>
+          </div>
+        )}
         <div className="hint" style={{ marginTop: 8 }}>{anchor} {anchorAlert ? <span className="warn">· {anchorAlert}</span> : null}</div>
         <div className="hint" style={{ marginTop: 8 }}>{status}</div>
         <div className="grid" style={{ marginTop: 10 }}>

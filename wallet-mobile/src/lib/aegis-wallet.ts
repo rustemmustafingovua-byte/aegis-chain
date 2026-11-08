@@ -5,7 +5,7 @@
 import { ml_dsa65 } from "@noble/post-quantum/ml-dsa.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { hexToBytes, bytesToHex } from "@noble/hashes/utils.js";
-import * as ed from "@noble/ed25519";
+import { ed } from "./noble-setup";
 
 function sha256Hex(s: string): string {
   // sync via simple hash for demo (in prod: noble sha256)
@@ -56,16 +56,23 @@ export function hybridGenerate(masterSeed?: Uint8Array): HybridKeypair {
 
 export function hybridSign(keys: HybridKeypair, msg: Uint8Array | string) {
   const data = typeof msg === "string" ? new TextEncoder().encode(msg) : msg;
-  const edSig = ed.sign(data, keys.edPrivate);
-  const mlSig = ml_dsa65.sign(data, keys.mlSecretKey);
-  const hybrid = sha256Hex(bytesToHex(edSig) + Buffer.from(mlSig).toString("base64"));
-  return { edSig: Buffer.from(edSig).toString("base64"), mlSig: Buffer.from(mlSig).toString("base64"), hybrid };
+  const edSigBytes = ed.sign(data, keys.edPrivate);
+  const mlSigBytes = ml_dsa65.sign(data, keys.mlSecretKey);
+  const edSig = Buffer.from(edSigBytes).toString("base64");
+  const mlSig = Buffer.from(mlSigBytes).toString("base64");
+  // MUST match core-ts/hybrid.ts: sha256(base64(edSig) + base64(mlSig)).
+  // The old version hashed hex(edSig) + base64(mlSig), so every wallet-signed tx
+  // was rejected by the node with "bad hybrid sig".
+  const hybrid = sha256Hex(edSig + mlSig);
+  return { edSig, mlSig, hybrid };
 }
 export function hybridVerify(edPub: Uint8Array, mlPub: Uint8Array, msg: Uint8Array | string, sig: { edSig: string; mlSig: string; hybrid: string }) {
   const data = typeof msg === "string" ? new TextEncoder().encode(msg) : msg;
   try {
     if (!ed.verify(Buffer.from(sig.edSig, "base64"), data, edPub)) return false;
-    return ml_dsa65.verify(Buffer.from(sig.mlSig, "base64"), data, mlPub);
+    if (!ml_dsa65.verify(Buffer.from(sig.mlSig, "base64"), data, mlPub)) return false;
+    // the binding field is not decorative: it ties both signatures to one message
+    return sha256Hex(sig.edSig + sig.mlSig) === sig.hybrid;
   } catch { return false; }
 }
 

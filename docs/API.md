@@ -1,4 +1,4 @@
-# AEGIS API — RPC и REST (v1.14)
+# AEGIS API — RPC и REST (v1.15)
 
 База: `POST /api/rpc` (JSON-RPC 2.0), `GET /api/state`, `GET /health`, `/` — explorer static.
 

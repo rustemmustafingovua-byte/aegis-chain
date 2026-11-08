@@ -59,10 +59,23 @@ launchctl list | grep aegis
 
 ```bash
 cd wallet-mobile && npm i && npm run dev   # :5188, нужен localhost/HTTPS для Passkey
+npm test                                   # 8 тестов: кошелёк ↔ ядро + light client
+npm run test:live                          # e2e против живого узла: tx из кошелька + proof баланса
 npm run build                              # dist/ → PWA (manifest + icon)
 ```
 
 RPC для баланса: `localStorage.setItem('aegis.rpc','http://127.0.0.1:8899/rpc')`.
+
+Кнопка **«✓ проверить без доверия»** проверяет баланс локально (checkpoint-подписи
+включая ML-DSA-65, заголовки, Merkle proof). Если она отвечает «не подтверждён —
+состояние изменилось после checkpoint», это нормально для свежего devnet:
+чекпоинт подписывается раз в `AEGIS_CHECKPOINT_EVERY` блоков (на devnet = 2).
+
+| Симптом | Причина |
+|---|---|
+| `hashes.sha512Sync not set` | `@noble/ed25519` импортирован в обход `lib/noble-setup.ts` |
+| «bad hybrid sig» от узла | подпись собрана не той каноничной строкой — см. `test/compat.test.ts` |
+| «баланс не подтверждён» | `proof.root ≠ cp.stateRoot`; дождись следующего checkpoint или проверь headers |
 
 ## Keeper / Bridge
 

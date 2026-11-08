@@ -13,4 +13,5 @@ broadcast/
 !wallet-mobile/src/lib/
 wallet-mobile/node_modules/
 wallet-mobile/dist/
+*.tsbuildinfo
 deployments/*.json
