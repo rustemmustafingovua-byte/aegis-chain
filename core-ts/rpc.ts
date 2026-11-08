@@ -13,19 +13,31 @@ import { Governance } from "./governance.js";
 import { Bridge } from "./bridge.js";
 import type { P2pNode } from "./p2p.js";
 import type { Libp2pNode } from "./libp2p.js";
-import { verifyMerkleProof, type MerkleProof } from "./merkle.js";
+import { verifyMerkleProof, merkleProof, type MerkleProof } from "./merkle.js";
 import {
   PasskeyRegistry, verifyRegistration, verifyAssertion, challengeFromHex, defaultOrigins, defaultRpId,
 } from "./webauthn.js";
-import { hybridVerify } from "./hybrid.js";
+import { hybridVerify, type HybridKeypair } from "./hybrid.js";
 import { VERSION } from "./version.js";
+import { WAL_SNAPSHOT_EVERY } from "./wal.js";
+import { headerFromBlock, validatorViewOf, verifyHeaderChain } from "./headers.js";
+import { CheckpointStore, createCheckpoint, verifyCheckpoint } from "./checkpoints.js";
 
 type RpcRequest = { jsonrpc: string; id: number | string; method: string; params: any[] };
 type RpcResponse = { jsonrpc: "2.0"; id: number | string; result?: unknown; error?: { code: number; message: string } };
 
-export type RpcDeps = { gov?: Governance; bridge?: Bridge; p2p?: P2pNode; libp2p?: Libp2pNode; passkeys?: PasskeyRegistry };
+export type RpcDeps = {
+  gov?: Governance; bridge?: Bridge; p2p?: P2pNode; libp2p?: Libp2pNode;
+  passkeys?: PasskeyRegistry;
+  /** v1.13 light client: signed state checkpoints */
+  checkpoints?: CheckpointStore;
+  /** node validator keys, used to co-sign checkpoints on request */
+  validator?: HybridKeypair;
+  /** persist the checkpoint store after a new signature (server wires this to disk) */
+  saveCheckpoints?: () => void;
+};
 
-const ADMIN_METHODS = new Set(["aeg_faucet", "aeg_slash", "aeg_registerValidator", "aeg_commitMlKey", "aeg_prune", "aeg_checkpoint"]);
+const ADMIN_METHODS = new Set(["aeg_faucet", "aeg_slash", "aeg_registerValidator", "aeg_commitMlKey", "aeg_prune", "aeg_checkpoint", "aeg_checkpointSign"]);
 
 export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {}) {
   // per-IP token bucket rate limit (100 req/s default, env AEGIS_RPC_RATE_LIMIT)
@@ -81,7 +93,14 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
         stateRoot: chain.ledger.stateRoot(),
         baseFee: chain.feeMarket.baseFee.toString(),
         suggestedFee: chain.feeMarket.suggest().toString(),
+        version: VERSION,
         passkeys: deps.passkeys ? deps.passkeys.byCredential.size : 0,
+        checkpoint: (() => {
+          const cp = deps.checkpoints?.latest();
+          if (!cp) return null;
+          const v = verifyCheckpoint(cp, validatorViewOf(chain));
+          return { height: cp.height, stateRoot: cp.stateRoot, signedBps: v.signedBps, signers: v.signers.length };
+        })(),
         validators: [...chain.validators.values()].map((v) => ({ edPublic: v.publicKey.slice(0, 20) + "…", stake: v.stake.toString(), address: v.address ?? null })),
         accounts: [...chain.ledger.accounts.entries()].map(([addr, a]) => ({ addr, balance: a.balance.toString(), stake: a.stake.toString(), nonce: a.nonce, humanityScore: a.humanityScore ?? null })),
         pools,
@@ -255,7 +274,7 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
         return { slashed: addr, bps: bps.toString(), cut: cut.toString() };
       }
       case "aeg_metrics": return { height: chain.height, mempool: chain.mempool.size, blocks: chain.blocks.length, validators: chain.validators.size, uptime: Math.floor(process.uptime()) };
-      case "aeg_walStatus": return { wal: "aegis-chain.wal.ndjson", height: chain.height, blocks: chain.blocks.length, snapshotEvery: 1000 };
+      case "aeg_walStatus": return { wal: "aegis-chain.wal.ndjson", height: chain.height, blocks: chain.blocks.length, snapshotEvery: WAL_SNAPSHOT_EVERY };
       case "aeg_finality": return { finalized: chain.isFinalized(), height: chain.height, totalStake: chain.totalStake().toString() };
       case "aeg_halving": return { height: chain.height, halvingFactor: chain.halvingFactor(), halvingEvery: 7_884_000 * 4 };
       case "aeg_snapshot": return chain.snapshot();
@@ -286,6 +305,58 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
       }
       case "aeg_prune": return { prunedHeight: chain.prune(Number(params[0] ?? 100)) };
       case "aeg_sync": return { height: chain.height, blocks: chain.blocks.length, stateRoot: chain.ledger.stateRoot() };
+
+      // ---- v1.13: light client (headers, tx proofs, signed checkpoints) ----
+      case "aeg_getHeaders": {
+        const from = Number(params[0] ?? 0);
+        const to = Number(params[1] ?? from + 20);
+        if (!Number.isInteger(from) || !Number.isInteger(to) || to < from) throw new Error("bad header range");
+        if (to - from > 100) throw new Error("header range too large (max 100)");
+        return chain.blocks
+          .filter((b) => b.header.height >= from && b.header.height <= to)
+          .map((b) => headerFromBlock(b));
+      }
+      case "aeg_verifyHeaders": {
+        // convenience: node verifies a batch for a client (client MUST re-verify if it cares)
+        const headers = params[0];
+        if (!Array.isArray(headers)) throw new Error("headers must be an array");
+        return verifyHeaderChain(headers, validatorViewOf(chain), {
+          expectedPrevHash: params[1]?.prevHash, expectedHeight: params[1]?.height,
+        });
+      }
+      case "aeg_getTxProof": {
+        const height = Number(params[0]);
+        const index = Number(params[1] ?? 0);
+        const b = chain.blocks.find((x) => x.header.height === height);
+        if (!b) throw new Error(`no block at height ${height}`);
+        if (!Number.isInteger(index) || index < 0 || index >= b.txs.length) throw new Error("tx index out of range");
+        const leaves = b.txs.map((t) => sha256Hex(Buffer.from(stringify(t))));
+        const proof = merkleProof(leaves, index);
+        if (proof.root !== b.header.merkleRoot) throw new Error("merkle root mismatch (corrupt block)");
+        return { tx: JSON.parse(stringify(b.txs[index])), proof, header: b.header, blockHash: b.hash };
+      }
+      case "aeg_validatorSet": {
+        const view = validatorViewOf(chain);
+        return [...view.entries()].map(([edPublic, v]) => ({
+          edPublic, publicKey: v.publicKey, mlPublicKeyB64: v.mlPublicKeyB64, stake: v.stake.toString(), address: v.address ?? null,
+        }));
+      }
+      case "aeg_checkpointLatest": {
+        const cp = deps.checkpoints?.latest();
+        if (!cp) return null;
+        return { checkpoint: cp, verification: verifyCheckpoint(cp, validatorViewOf(chain)) };
+      }
+      case "aeg_getCheckpoints": {
+        if (!deps.checkpoints) return [];
+        return deps.checkpoints.list(Number(params[0] ?? 0), Math.min(Number(params[1] ?? 50), 200));
+      }
+      case "aeg_checkpointSign": {
+        if (!deps.checkpoints || !deps.validator) throw new Error("checkpoint signing not configured");
+        const cp = createCheckpoint(chain, deps.validator);
+        deps.checkpoints.add(cp);
+        try { deps.saveCheckpoints?.(); } catch { /* best effort, signature still in memory */ }
+        return { checkpoint: cp, verification: verifyCheckpoint(cp, validatorViewOf(chain)) };
+      }
 
       // ---- v1.12: fee market ----
       case "aeg_gasPrice": {

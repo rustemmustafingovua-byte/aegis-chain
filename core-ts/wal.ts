@@ -7,8 +7,8 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Block } from "./chain.js";
-import { stringify } from "./ledger.js";
+import type { Block, Chain } from "./chain.js";
+import { stringify, parseTx } from "./ledger.js";
 
 export const WAL_SNAPSHOT_EVERY = 1000;
 
@@ -53,6 +53,38 @@ export class Wal {
   status(height: number) {
     return { walPath: this.walPath, snapshotPath: this.snapshotPath, walBlocks: this.blocks, walBytes: this.bytes, height };
   }
+}
+
+/**
+ * v1.13: durability. On startup a node loads the snapshot and replays WAL blocks
+ * newer than it. Handles torn last line (crash mid-append) by stopping at the
+ * first unparseable/invalid block instead of throwing away the whole log.
+ */
+export function replayWal(chain: Chain, walPath: string): { applied: number; skipped: number; corrupt: boolean; height: number } {
+  let applied = 0, skipped = 0, corrupt = false;
+  if (!fs.existsSync(walPath)) return { applied, skipped, corrupt, height: chain.height };
+  let text = "";
+  try { text = fs.readFileSync(walPath, "utf8"); } catch { return { applied, skipped, corrupt: true, height: chain.height }; }
+  const lines = text.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let raw: any;
+    try { raw = JSON.parse(trimmed); } catch { corrupt = true; break; } // torn tail
+    try {
+      const b: Block = { ...raw, txs: (raw.txs ?? []).map((t: any) => parseTx(t)) };
+      const height = b.header?.height;
+      if (typeof height !== "number") { corrupt = true; break; }
+      if (height <= chain.height) { skipped++; continue; }
+      if (height !== chain.height + 1) { corrupt = true; break; } // gap: cannot apply
+      chain.accept(b);
+      applied++;
+    } catch {
+      corrupt = true;
+      break;
+    }
+  }
+  return { applied, skipped, corrupt, height: chain.height };
 }
 
 export function walPaths(stateFile: string) {

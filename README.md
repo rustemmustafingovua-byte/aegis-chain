@@ -29,16 +29,44 @@ python3 demo.py        # демо: нормальный юзер проходи�
 python3 -m pytest test_aegis.py -v   # тесты
 ```
 
-### v1.12 TypeScript Chain (как Lumen) + ML-DSA + Mesh + Infra + Дизайн
+### v1.13 — Light client, checkpoints и durable WAL (сделано)
+- **Checkpoints**: `stateRoot + blockHash` подписаны гибридно (Ed25519 + ML-DSA-65), порог ≥2/3
+  стейка, авто каждые N блоков, `aeg_checkpointLatest|getCheckpoints|checkpointSign`
+- **Header sync**: `aeg_getHeaders|verifyHeaders|validatorSet` — height/prevHash, пересчёт хеша,
+  гибридная подпись и VRF-пропозер, якорь от checkpoint
+- **Tx inclusion proof**: `aeg_getTxProof` против `header.merkleRoot`
+- **WAL**: append-only NDJSON + `replayWal` с терпимостью к torn tail; snapshot раз в 1000 блоков
+  вместо полной перезаписи на каждый блок
+- **Explorer**: вкладка **Light client** — checkpoint-кворум, связка заголовков, Ed25519 в WebCrypto
+- **CLI**: `aegis send --to … --amount …` (подпись гибридная, nonce/fee из RPC)
+
+### v1.13 TypeScript Chain (как Lumen) + ML-DSA + Mesh + Infra + Light client
 ```bash
 cd ~/workspace/workspace/aegis-chain
 npm install
-npm test               # 56 passing: hybrid, Chain, Shamir, Mesh, P2P, RPC, AMM, Governance, Bridge, security, fee market, light-client proofs, WebAuthn/Passkey + 31 forge tests
+npm test               # 66 passing: hybrid, Chain, Shamir, Mesh, P2P, RPC, AMM, Governance, Bridge, security, fee market, Merkle proofs, WebAuthn/Passkey, signed checkpoints, header sync, WAL replay + 31 forge tests
 npm run demo           # Ed25519+ML-DSA-65, intent, offline mesh, PoS block
 npm run build          # tsc → dist/
-npm run serve          # :8899 RPC+Explorer v1.0, :3899 TCP + :4899 libp2p Noise (живой узел)
+npm run serve          # :8899 RPC+Explorer, :3899 TCP + :4899 libp2p Noise (живой узел, WAL + checkpoints)
 npm run keeper         # автономный конвертер USDC→AEGIS
+npx tsx cli/aegis.ts send --to=aeg1... --amount=1000 --intent="оплата"
 ```
+
+Devnet heartbeat (чтобы цепь росла без транзакций и появлялись чекпоинты):
+
+```bash
+AEGIS_EMPTY_BLOCK_SLOTS=15 AEGIS_CHECKPOINT_EVERY=2 npm run serve
+```
+
+Проверка лёгкого клиента без доверия узлу:
+
+```bash
+curl -s :8899/api/rpc -d '{"jsonrpc":"2.0","id":1,"method":"aeg_checkpointLatest","params":[]}' -H 'Content-Type: application/json'
+curl -s :8899/api/rpc -d '{"jsonrpc":"2.0","id":2,"method":"aeg_getHeaders","params":[0,20]}' -H 'Content-Type: application/json'
+curl -s :8899/api/rpc -d '{"jsonrpc":"2.0","id":3,"method":"aeg_getTxProof","params":[1,0]}' -H 'Content-Type: application/json'
+```
+
+Публичный devnet-URL (переменный, обновляется keepalive): `~/.local/state/aegis-url.txt`.
 
 ### Мобильный кошелёк с Passkey (v1.0 — bottom nav, QR mesh, shield checklist, PWA)
 ```bash
@@ -49,7 +77,7 @@ npm run build          # 310KB gzip 102KB — PWA manifest + icon
 # iPhone/Android: создай Passkey (Touch/Face ID), кошелёк шифруется им
 ```
 
-## Полная инфраструктура (v1.12)
+## Полная инфраструктура (v1.13)
 
 | Компонент | Где | Запуск |
 |---|---|---|
@@ -62,13 +90,17 @@ npm run build          # 310KB gzip 102KB — PWA manifest + icon
 | **Explorer** живой, отдаётся узлом (KPI, sparkline, hybrid-verify, gov/bridge, light-client proof) | `explorer/index.html`, `docs/DESIGN.md` | `GET /` |
 | **Fee market** EIP-1559-lite base fee + `aeg_gasPrice` | `core-ts/fee.ts`, `docs/FEE.md` | авто |
 | **Light client** Merkle state proofs (`aeg_getProof`) | `core-ts/merkle.ts`, `docs/LIGHT_CLIENT.md` | `POST /api/rpc` |
+| **Signed checkpoints** ≥2/3 стейка, авто каждые 10 блоков | `core-ts/checkpoints.ts`, `docs/LIGHT_CLIENT.md` | `aeg_checkpointLatest` |
+| **Header sync** цепочка заголовков + VRF-проверка пропозера | `core-ts/headers.ts` | `aeg_getHeaders` / `aeg_verifyHeaders` |
+| **Tx inclusion proof** против `header.merkleRoot` | `core-ts/rpc.ts` (`aeg_getTxProof`) | `POST /api/rpc` |
+| **WAL durability** append-only лог + replay с терпимостью к torn tail | `core-ts/wal.ts`, `docs/WAL.md` | авто |
 | **Passkey server** WebAuthn registration/assertion, TOFU key binding | `core-ts/webauthn.ts`, `docs/PASSKEY.md` | авто |
 | **Keeper** конвертер без биржи (AMM x*y=k 0.3%) | `keeper/keeper.ts` | `npm run keeper` |
 | **Контракты Base** ERC-20 + AMM + Staking + Governance + Multisig | `contracts/` | `forge create` |
 | **Mobile Wallet** Passkey, Shamir 3-of-5 backup, QR, history, shield | `wallet-mobile/` | `npm run dev` |
 | **CI/CD** GH Actions (slither, wallet), Docker hardened, keepalive | `.github/workflows/ci.yml`, `scripts/`, `Dockerfile` | — |
 
-Документация: `docs/FEE.md`, `docs/LIGHT_CLIENT.md`, `docs/PASSKEY.md`, `docs/PROD.md`, `docs/DESIGN.md`, `docs/SDK.md`, `docs/TUTORIAL.md`, `docs/TOKENOMICS.md`, `docs/ROADMAP.md`, `docs/API.md`, `docs/OPS.md`, `docs/THREAT_MODEL.md`, `docs/INFRA.md`, `docs/MESH.md`, `docs/MOBILE.md`, `ARCHITECTURE.md`
+Документация: `docs/FEE.md`, `docs/LIGHT_CLIENT.md`, `docs/WAL.md`, `docs/PASSKEY.md`, `docs/PROD.md`, `docs/DESIGN.md`, `docs/SDK.md`, `docs/TUTORIAL.md`, `docs/TOKENOMICS.md`, `docs/ROADMAP.md`, `docs/API.md`, `docs/OPS.md`, `docs/THREAT_MODEL.md`, `docs/INFRA.md`, `docs/MESH.md`, `docs/MOBILE.md`, `ARCHITECTURE.md`
 
 ## Токеномика (черновик)
 

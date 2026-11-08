@@ -13,7 +13,7 @@ import { Chain, SLOT_MS } from "./chain.js";
 import { createRpcServer } from "./rpc.js";
 import { P2pNode } from "./p2p.js";
 import { Libp2pNode } from "./libp2p.js";
-import { Wal, walPaths, WAL_SNAPSHOT_EVERY } from "./wal.js";
+import { Wal, walPaths, WAL_SNAPSHOT_EVERY, replayWal } from "./wal.js";
 import { loadConfig } from "./config.js";
 import { logger } from "./logger.js";
 import { Governance } from "./governance.js";
@@ -22,6 +22,7 @@ import { Discovery, BOOTSTRAP } from "./discovery.js";
 import { hybridGenerate, type HybridKeypair } from "./hybrid.js";
 import { MeshNode } from "./mesh.js";
 import { PasskeyRegistry } from "./webauthn.js";
+import { CheckpointStore, createCheckpoint } from "./checkpoints.js";
 
 export type ServeOpts = {
   port?: number;
@@ -29,6 +30,12 @@ export type ServeOpts = {
   stateFile?: string; // persisted chain snapshot (default ~/.local/state/aegis-chain.json)
   autoPropose?: boolean; // produce empty/thin blocks on slot timer (default true if mempool>0)
   validatorSeed?: Buffer; // deterministic single-node validator for devnet
+  /**
+   * Idle heartbeat: if the mempool is empty, still produce an empty block every N slots
+   * (0 = never, default). Keeps a devnet chain (and therefore its checkpoints and
+   * light-client anchors) advancing. Set AEGIS_EMPTY_BLOCK_SLOTS=15 for ~1 block/min.
+   */
+  emptyBlockSlots?: number;
 };
 
 export async function serveNode(port = loadConfig().port, p2pPort = loadConfig().p2pPort, opts: ServeOpts = {}) {
@@ -61,6 +68,13 @@ export async function serveNode(port = loadConfig().port, p2pPort = loadConfig()
       chain.ledger.get(validator.address).edPublic = validator.edPublic;
     }
   }
+  // v1.13: durability — snapshot + WAL replay (recovers blocks written after the last snapshot)
+  try {
+    const { walPath } = walPaths(stateFile);
+    const r = replayWal(chain, walPath);
+    if (r.applied > 0 || r.corrupt) logger.info("wal replay", { applied: r.applied, skipped: r.skipped, corrupt: r.corrupt, height: r.height });
+  } catch (e: any) { logger.warn("wal replay failed", { error: e.message }); }
+
   gov = new Governance(chain);
   const bridge = new Bridge();
   // v1.12: passkey bindings live next to the chain snapshot
@@ -69,11 +83,19 @@ export async function serveNode(port = loadConfig().port, p2pPort = loadConfig()
   try {
     if (fs.existsSync(passkeyFile)) passkeys = PasskeyRegistry.fromJSON(JSON.parse(fs.readFileSync(passkeyFile, "utf8")));
   } catch (e: any) { logger.warn("passkey registry load failed", { error: e.message }); }
+  const checkpointFile = stateFile.replace(/\.json$/, "-checkpoints.json");
+  let checkpoints = new CheckpointStore();
+  try {
+    if (fs.existsSync(checkpointFile)) checkpoints = CheckpointStore.fromJSON(JSON.parse(fs.readFileSync(checkpointFile, "utf8")));
+  } catch (e: any) { logger.warn("checkpoint store load failed", { error: e.message }); }
+  const saveCheckpoints = () => { try { fs.writeFileSync(checkpointFile, JSON.stringify(checkpoints.toJSON())); } catch { /* best effort */ } };
+  // fresh devnet: publish a checkpoint immediately so light clients have an anchor
+  if (validator && !checkpoints.latest()) { checkpoints.add(createCheckpoint(chain, validator)); saveCheckpoints(); }
   const discovery = new Discovery();
   for (const b of BOOTSTRAP) discovery.add(b);
   // mesh node bound to validator (offline settlement endpoint)
   const mesh = validator ? new MeshNode(`aegis-node-${port}`, validator) : undefined;
-  const deps: { gov: Governance; bridge: Bridge; p2p?: any; passkeys: PasskeyRegistry } = { gov, bridge, passkeys };
+  const deps: { gov: Governance; bridge: Bridge; p2p?: any; passkeys: PasskeyRegistry; checkpoints: CheckpointStore; validator?: HybridKeypair; saveCheckpoints: () => void } = { gov, bridge, passkeys, checkpoints, validator, saveCheckpoints };
   const rpc = createRpcServer(chain, mesh, deps);
   // static explorer + RPC proxy in one HTTP server
   const here = (import.meta as any).dirname ?? path.dirname(fileURLToPath(import.meta.url));
@@ -105,34 +127,56 @@ export async function serveNode(port = loadConfig().port, p2pPort = loadConfig()
     nodeId: `aegis-node-${port}`,
     signKey: validator ? { edPrivate: validator.edPrivate, edPublic: validator.edPublic } : undefined,
   });
-  await libp2pNode.start();
+  try {
+    await libp2pNode.start();
+  } catch (e: any) {
+    // A busy P2P port must not take down RPC/explorer: run single-transport (TCP lite).
+    logger.warn("libp2p start failed, continuing with TCP p2p only", { error: e.message });
+  }
   (deps as any).libp2p = libp2pNode;
   // auto-proposer: produce block each slot if mempool non-empty or validator idle
   let slot = chain.height + 1;
   let timer: NodeJS.Timeout | null = null;
+  const wal = (() => { const { walPath, snapshotPath } = walPaths(stateFile); return new Wal(walPath, snapshotPath); })();
+  const emptyBlockSlots = opts.emptyBlockSlots ?? (Number(process.env.AEGIS_EMPTY_BLOCK_SLOTS ?? 0) || 0);
+  const checkpointEvery = Number(process.env.AEGIS_CHECKPOINT_EVERY ?? 10) > 0 ? Number(process.env.AEGIS_CHECKPOINT_EVERY ?? 10) : 10;
   if (validator) {
+    // one place that turns a produced block into durable state (WAL, passkeys, checkpoint)
+    const persistBlock = (block: ReturnType<Chain["produceNextBlock"]>) => {
+      p2p.gossipBlock(block);
+      libp2pNode.gossipBlock(block);
+      logger.info("produced", {
+        height: block.header.height, txs: block.header.txCount,
+        baseFee: chain.feeMarket.baseFee.toString(), empty: block.header.txCount === 0,
+      });
+      try { fs.writeFileSync(passkeyFile, JSON.stringify(passkeys.toJSON())); } catch { /* best effort */ }
+      // v1.13: WAL append per block (cheap), full snapshot every WAL_SNAPSHOT_EVERY.
+      // Crash recovery = snapshot + replayWal; no full JSON rewrite per block.
+      try {
+        wal.append(block);
+        if (block.header.height % WAL_SNAPSHOT_EVERY === 0) wal.compact(chain);
+      } catch (e: any) { logger.warn("persist failed", { error: e.message }); }
+      // signed checkpoint every N blocks (light-client anchor, AEGIS_CHECKPOINT_EVERY)
+      if (block.header.height % checkpointEvery === 0) {
+        try {
+          const cp = createCheckpoint(chain, validator);
+          checkpoints.add(cp);
+          saveCheckpoints();
+          logger.info("checkpoint", { height: cp.height, stateRoot: cp.stateRoot.slice(0, 16) });
+        } catch (e: any) { logger.warn("checkpoint failed", { error: e.message }); }
+      }
+    };
     const tick = () => {
       try {
         // only propose if we are the slot proposer
         const expected = chain.proposerForSlot(slot);
         if (expected === validator.edPublic) {
-          if (chain.mempool.size > 0) {
-            const block = chain.produceNextBlock(validator, slot);
-            p2p.gossipBlock(block);
-            libp2pNode.gossipBlock(block);
-            logger.info("produced", { height: block.header.height, txs: block.header.txCount, baseFee: chain.feeMarket.baseFee.toString() });
-            try { fs.writeFileSync(passkeyFile, JSON.stringify(passkeys.toJSON())); } catch { /* best effort */ }
-            // WAL append (durable) + snapshot every WAL_SNAPSHOT_EVERY blocks
-            try {
-              const { walPath, snapshotPath } = walPaths(stateFile);
-              const wal = new Wal(walPath, snapshotPath);
-              wal.append(block);
-              if (block.header.height % WAL_SNAPSHOT_EVERY === 0) wal.compact(chain);
-              else chain.saveToFile(stateFile);
-            } catch (e: any) { logger.warn("persist failed", { error: e.message }); }
-          } else {
-            // idle tick: advance slot counter without empty blocks (avoid chain bloat)
+          const hasTx = chain.mempool.size > 0;
+          const heartbeat = !hasTx && emptyBlockSlots > 0 && slot % emptyBlockSlots === 0;
+          if (hasTx || heartbeat) {
+            persistBlock(chain.produceNextBlock(validator, slot));
           }
+          // else idle tick: advance the slot counter without producing a block (avoid bloat)
           slot++;
         }
       } catch (e: any) {
@@ -153,5 +197,5 @@ export async function serveNode(port = loadConfig().port, p2pPort = loadConfig()
   };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
-  return { chain, httpServer, p2p, libp2pNode, gov, bridge, discovery, mesh, validator, stop };
+  return { chain, httpServer, p2p, libp2pNode, gov, bridge, discovery, mesh, validator, checkpoints, stop };
 }

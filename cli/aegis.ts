@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * AEGIS CLI — wallet new / send / mesh / demo / bench
+ * AEGIS CLI — wallet new / send / mesh / demo / bench / serve
  */
 import { createHash, randomBytes } from "node:crypto";
 import { hybridGenerate, hybridSign } from "../core-ts/hybrid.js";
@@ -65,11 +65,68 @@ function walletNew() {
   console.log("\nСохрани mlSeed и edPrivate в Hardware Enclave (Passkey-derived). Никогда не публикуй!");
 }
 
+/**
+ * Send a signed tx to a running node. Used by devnet demo/ops scripts.
+ *   tsx cli/aegis.ts send --to=aeg1... --amount=1000 [--rpc=http://127.0.0.1:8899]
+ *                        [--seed=<64 hex chars>] [--intent="..."] [--domain=aegis.local]
+ * Без --seed берётся детерминированный devnet-ключ (тот же, что у `serve`).
+ */
+async function sendCmd(args: string[]) {
+  const arg = (name: string, dflt?: string) => {
+    const hit = args.find((a) => a === `--${name}` || a.startsWith(`--${name}=`));
+    if (!hit) return dflt;
+    const eq = hit.indexOf("=");
+    return eq >= 0 ? hit.slice(eq + 1) : args[args.indexOf(hit) + 1];
+  };
+  const rpcUrl = (arg("rpc") ?? "http://127.0.0.1:8899").replace(/\/$/, "");
+  const to = arg("to");
+  if (!to) throw new Error("--to is required");
+  const amount = BigInt(arg("amount") ?? "1");
+  const intent = arg("intent") ?? "cli transfer";
+  const domain = arg("domain") ?? "aegis.local";
+  const seedArg = arg("seed");
+  const seed = seedArg
+    ? Buffer.from(seedArg, "hex")
+    : Buffer.from("aegis-devnet-validator-seed-v07!", "utf8").subarray(0, 32);
+  if (seed.length < 32) throw new Error("--seed must be >=32 bytes hex");
+  const kp = hybridGenerate(Buffer.from(seed));
+  if (!seedArg) console.log("[devnet] using deterministic validator key — pass --seed for other keys");
+
+  const rpc = async (method: string, params: any[]) => {
+    const r = await fetch(`${rpcUrl}/api/rpc`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    });
+    const j = await r.json() as any;
+    if (j.error) throw new Error(`${method}: ${j.error.message}`);
+    return j.result;
+  };
+
+  const [acct, gas] = await Promise.all([rpc("aeg_getAccount", [kp.address]), rpc("aeg_gasPrice", [])]);
+  const fee = BigInt(gas.suggestedMaxFee ?? gas.baseFee);
+  const tx: any = {
+    from: kp.address, to, amount, fee, nonce: Number(acct.nonce),
+    intent, domain, timestamp: Date.now(),
+    sig: { edSig: "", mlSig: "", hybrid: "" },
+    mlPublicKeyB64: Buffer.from(kp.mlPublicKey).toString("base64"),
+    edPublicB64: kp.edPublic,
+    data: "",
+  };
+  const msg = new Ledger().txMessage(tx);
+  tx.sig = hybridSign(kp, msg);
+  const json = JSON.parse(JSON.stringify(tx, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
+  const res = await rpc("aeg_sendTx", [json]);
+  console.log(JSON.stringify({ from: kp.address, to, amount: amount.toString(), fee: fee.toString(), nonce: tx.nonce, result: res }, null, 2));
+}
+
 async function serveCmd(portArg?: string) {
   const port = portArg ? parseInt(portArg.replace("--port=", "")) : 8899;
-  console.log(`[aegis] serving on :${port} (rpc+explorer+p2p)`);
+  // P2P port derives from the RPC port so several nodes can run on one host
+  // (8899→3899 as documented; AEGIS_P2P_PORT overrides, e.g. behind a firewall).
+  const p2pPort = Number(process.env.AEGIS_P2P_PORT ?? (port >= 5000 ? port - 5000 : port + 1000));
+  console.log(`[aegis] serving on :${port} (rpc+explorer+p2p :${p2pPort})`);
   const { serveNode } = await import("../core-ts/server.js");
-  await serveNode(port, 3899);
+  await serveNode(port, p2pPort);
   console.log("Ctrl+C to stop");
 }
 
@@ -79,7 +136,8 @@ async function main() {
   else if (cmd === "wallet" && process.argv[3] === "new") walletNew();
   else if (cmd === "mesh") await demo();
   else if (cmd === "bench") { const { runBench } = await import("./bench.js"); await runBench(); }
+  else if (cmd === "send") await sendCmd(process.argv.slice(3));
   else if (cmd === "serve" || cmd === "node" || cmd === "explorer") await serveCmd(process.argv[3]);
-  else console.log("Usage: tsx cli/aegis.ts [demo|mesh|serve|node|explorer|bench|wallet new]");
+  else console.log("Usage: tsx cli/aegis.ts [demo|mesh|send|serve|node|explorer|bench|wallet new]\n       tsx cli/aegis.ts send --to=aeg1... --amount=1000 [--rpc=URL] [--seed=hex] [--intent=...]");
 }
 main();

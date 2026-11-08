@@ -12,11 +12,21 @@
 - **Light client**: доменно-разделённое Merkle-дерево состояния + `aeg_getProof`, проверка в браузере
 - Единый `VERSION` (core-ts/version.ts) — дрейф с package.json ловится тестом
 
-## v1.3 — Production hardening (осталось)
-- Slither в CI + external audit (Trail of Bits/Zellic), bug bounty escrow
-- gossipsub для блоков (topic уже есть), checkpoint-подписи валидаторов для лёгких клиентов
+## v1.13 — Light client & durability (сделано)
+- **Signed checkpoints**: `stateRoot + blockHash` подписан гибридно, порог ≥2/3 стейка (6667 bps),
+  авто-подпись каждые 10 блоков, store на 256 последних, `aeg_checkpointLatest|getCheckpoints|checkpointSign`
+- **Header sync**: `verifyHeaderChain` — height/prevHash, пересчёт `headerHash`, гибридная
+  подпись, stake-weighted VRF пропозера, якорь от checkpoint (`aeg_getHeaders|verifyHeaders|validatorSet`)
+- **Tx inclusion proofs**: `aeg_getTxProof` против `header.merkleRoot`
+- **WAL durability**: append-only NDJSON + `replayWal` (идемпотентный, терпит torn tail),
+  snapshot раз в 1000 блоков вместо полной перезаписи на каждый блок
+- Explorer: вкладка **Light client** — checkpoint + связка заголовков + Ed25519 в WebCrypto
+
+## v1.4 — Production hardening (осталось)
+- Slither cleanup в CI + external audit (Trail of Bits/Zellic), bug bounty escrow
+- gossipsub для блоков (topic уже есть), checkpoint pinning в кошельке/explorer
 - Expo native passkey + BLE mesh sync, push-нотификации
-- Prometheus/Grafana манифесты, WAL compaction, non-inclusion proofs для nullifier'ов
+- Prometheus/Grafana манифесты, non-inclusion proofs для nullifier'ов, Base Sepolia deploy контрактов
 
 ## v2.0 — Trust Mode
 - Hard-fork «Trust Mode»: real USDC bridge + mainnet settlement, листинг LP

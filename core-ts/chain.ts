@@ -39,9 +39,12 @@ export type Block = {
   hash: string;
 };
 
-export function blockHash(b: Block): string {
-  const h = b.header;
+/** Hash of a block header — the thing validators sign (v1.13: reusable by light clients). */
+export function headerHash(h: BlockHeader): string {
   return sha256([h.height, h.prevHash, h.timestamp, h.proposer, h.merkleRoot, h.txCount, h.slot].join("|"));
+}
+export function blockHash(b: Block): string {
+  return headerHash(b.header);
 }
 export class ChainError extends Error {}
 export class Mempool {
