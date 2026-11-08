@@ -45,9 +45,24 @@
   `getPublicKey/sign/verify` падают в браузере и в node
 - CI: `cd wallet-mobile && npm ci && npm test && npm run build`
 
+## v1.16 — Сеть из нескольких узлов (сделано)
+- **Sync без ложных банов**: `classifyBlock` (next/duplicate/gap/fork) + `SyncTracker`
+  (cooldown, экспоненциальный backoff, отсечка мёртвых пиров); gap → `sync_request`
+- **Bootstrap с переподключением**: одиночный `connect()` больше не оставляет узел
+  в изоляции при `ECONNREFUSED`
+- **Мультиватор devnet**: `AEGIS_VALIDATOR_SEED` (строка → sha256), общий
+  `AEGIS_GENESIS_VALIDATORS` (сортированное применение → одинаковый stateRoot),
+  слоты по часам (иначе узлы перестают предлагать блоки)
+- **Кворум ≥2/3 видимого стейка**: изолированный узел блоки не производит
+- **Checkpoint-кворум**: `aeg_checkpointOffer` — сосед подписывает только свой tip;
+  `AEGIS_CHECKPOINT_PEERS`, слияние подписей, ретраи
+- `aeg_syncStatus`, `/metrics {peer_count, forks_seen}`, `npm run devnet:multi`
+- Проверено: 3 узла → одинаковые head/stateRoot, 3 пропозера, checkpoint 6667 bps
+
 ## v1.4 — Production hardening (осталось)
 - Slither cleanup в CI + external audit (Trail of Bits/Zellic), bug bounty escrow
-- gossipsub для блоков (topic уже есть; применяем блоки от пиров, не только ретранслируем)
+- fork-choice / реорганизация: сейчас форк только наблюдается (нет переключения ветки)
+- headers-first догон вместо блоков (дешевле для длинного отставания)
 - Expo native passkey + BLE mesh sync, push-нотификации
 - Prometheus/Grafana манифесты, Base Sepolia deploy контрактов
 - Nullifier-дерево: инкрементальный (sparse) update вместо пересборки на каждый блок

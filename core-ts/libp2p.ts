@@ -33,6 +33,7 @@ import type { Chain, Block } from "./chain.js";
 import { parseTx, stringify, type Tx } from "./ledger.js";
 import { verify, sign } from "./crypto.js";
 import type { P2pMessage } from "./p2p.js";
+import { SyncTracker, applyIncomingBlock, blockRef, classifyBlock } from "./sync.js";
 import { peerIdFromString } from "@libp2p/peer-id";
 
 export const AEGIS_PROTOCOL = "/aegis/1.0/gossip";
@@ -53,6 +54,7 @@ export type Libp2pPeerState = {
   rateWindow: number;
   lastSeen: number;
   stream?: any;
+  height?: number;
 };
 
 export type Libp2pNodeOpts = {
@@ -80,6 +82,9 @@ export class Libp2pNode {
   peers = new Map<string, Libp2pPeerState>();
   opts: Required<Pick<Libp2pNodeOpts, "listenPort">> & Libp2pNodeOpts;
   running = false;
+  /** v1.16: sync bookkeeping shared by stream + gossipsub paths */
+  tracker = new SyncTracker();
+  forksSeen = 0;
 
   constructor(chain: Chain, opts: Libp2pNodeOpts = {}) {
     this.chain = chain;
@@ -228,6 +233,41 @@ export class Libp2pNode {
   }
 
   /** Single source of truth for message validation (same semantics as p2p.ts). */
+  /**
+   * v1.16: open a stream to a peer we only know from gossipsub, so we can ask
+   * it for missing blocks. Gossipsub has no targeted request primitive.
+   */
+  private async ensureStream(pid: string): Promise<any | undefined> {
+    const st = this.peers.get(pid);
+    if (st?.stream) return st.stream;
+    try {
+      const stream = await this.libp2p!.dialProtocol(pid as any, AEGIS_PROTOCOL);
+      this.ensurePeer(pid, stream);
+      void this.readStream(stream, pid);
+      return stream;
+    } catch {
+      return undefined;
+    }
+  }
+  /** Ask a peer for everything after `fromHeight` (dials on demand). */
+  requestSync(pid: string, fromHeight: number) {
+    this.tracker.noteRequest(pid, fromHeight);
+    const msg: P2pMessage = { type: "sync_request", fromHeight };
+    const st = this.peers.get(pid);
+    if (st?.stream) { this.send(pid, msg); return; }
+    void this.ensureStream(pid).then((stream) => { if (stream) this.send(pid, msg); });
+  }
+  syncStatus() {
+    return {
+      transport: "libp2p",
+      height: this.chain.height,
+      peers: [...this.peers.values()].map((p) => ({
+        peerId: p.peerId, nodeId: p.nodeId, score: p.score, banned: p.banned, height: p.height, lastSeen: p.lastSeen,
+      })),
+      forksSeen: this.forksSeen,
+      sync: this.tracker.status(),
+    };
+  }
   private onMessage(pid: string, line: string) {
     const st = this.peers.get(pid);
     if (!st || st.banned) return;
@@ -253,6 +293,17 @@ export class Libp2pNode {
 
     try {
       switch (msg.type) {
+        case "pong": {
+          const h = (msg as any).height as number;
+          if (typeof h === "number") {
+            st.height = Math.max(st.height ?? 0, h);
+            this.tracker.noteHeight(pid, h);
+            if (h > this.chain.height && this.tracker.shouldRequest(pid, this.chain.height)) {
+              this.requestSync(pid, this.chain.height);
+            }
+          }
+          break;
+        }
         case "hello": {
           const h = msg as any;
           st.nodeId = h.nodeId;
@@ -265,9 +316,13 @@ export class Libp2pNode {
             }
             st.score += 10;
           }
+          st.height = typeof h.height === "number" ? h.height : st.height;
           if (h.height < this.chain.height) {
             const blocks = this.chain.blocks.filter((b) => b.header.height > h.height);
             if (blocks.length) this.send(pid, { type: "sync_response", blocks: blocks.slice(0, 100) as Block[] });
+          } else if (h.height > this.chain.height) {
+            this.tracker.noteHeight(pid, h.height);
+            if (this.tracker.shouldRequest(pid, this.chain.height)) this.requestSync(pid, this.chain.height);
           }
           this.send(pid, { type: "pong", height: this.chain.height });
           break;
@@ -278,14 +333,24 @@ export class Libp2pNode {
         case "new_block": {
           const block = (msg as any).block as Block;
           if (block?.txs) block.txs = block.txs.map((t: any) => parseTx(t));
-          try {
-            this.chain.accept(block);
+          st.height = Math.max(st.height ?? 0, block?.header?.height ?? 0);
+          const res = applyIncomingBlock({
+            chain: this.chain, block, peerId: pid, tracker: this.tracker,
+            requestSync: (fromHeight) => this.requestSync(pid, fromHeight),
+          });
+          if (res.action === "applied") {
             st.score += 5;
+            this.tracker.noteForwarded(pid);
             console.log(`[libp2p] new_block height=${block.header.height} from ${st.nodeId ?? pid}`);
             this.broadcast(msg as P2pMessage, pid);
-          } catch (e: any) {
-            console.warn(`[libp2p] block rejected from ${st.nodeId ?? pid}: ${e.message}`);
-            this.penalize(pid, -20, `invalid block: ${e.message}`);
+          } else if (res.action === "reject") {
+            console.warn(`[libp2p] block rejected from ${st.nodeId ?? pid}: ${res.reason}`);
+            this.penalize(pid, -20, `invalid block: ${res.reason}`);
+          } else if (res.action === "sync") {
+            console.log(`[libp2p] gap at ${block.header.height} (head ${this.chain.height}) — syncing from ${st.nodeId ?? pid}`);
+          } else if ((res as any).cls === "fork") {
+            this.forksSeen++;
+            console.warn(`[libp2p] fork block h=${block.header.height} from ${st.nodeId ?? pid} — observed, not banned`);
           }
           break;
         }
@@ -314,11 +379,24 @@ export class Libp2pNode {
         case "sync_response": {
           const blocks = (msg as any).blocks as Block[];
           if (!Array.isArray(blocks) || blocks.length > 100) { this.penalize(pid, -10, "sync_response too large"); break; }
+          let appliedCount = 0;
+          let failed: string | undefined;
           for (const b of blocks) {
             if (b.txs) b.txs = b.txs.map((t: any) => parseTx(t));
-            try { this.chain.accept(b); } catch (e: any) { this.penalize(pid, -5, `sync block invalid: ${e.message}`); break; }
+            if (classifyBlock(this.chain, blockRef(b)) === "duplicate") continue;
+            try { this.chain.accept(b); appliedCount++; } catch (e: any) { failed = e.message; break; }
           }
-          st.score += 5;
+          if (failed) {
+            this.tracker.noteFailure(pid, failed);
+            this.penalize(pid, -5, `sync block invalid: ${failed}`);
+          } else {
+            this.tracker.noteSuccess(pid);
+            st.score += 5;
+            if (appliedCount) console.log(`[libp2p] synced ${appliedCount} blocks from ${st.nodeId ?? pid} — height ${this.chain.height}`);
+            if ((st.height ?? 0) > this.chain.height && this.tracker.shouldRequest(pid, this.chain.height)) {
+              this.requestSync(pid, this.chain.height);
+            }
+          }
           break;
         }
         case "mesh_packet":

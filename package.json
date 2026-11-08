@@ -1,6 +1,6 @@
 {
   "name": "aegis-chain",
-  "version": "1.15.0",
+  "version": "1.16.0",
   "description": "AEGIS — post-quantum hybrid chain with anti-AI shield, offline mesh autonomy, P2P network, RPC, explorer, keeper and Passkey wallet",
   "type": "module",
   "license": "MIT",
@@ -47,7 +47,8 @@
     "explorer": "tsx cli/aegis.ts serve --port=8899",
     "keeper": "tsx keeper/keeper.ts",
     "contracts": "forge test",
-    "keeper:bridge": "tsx keeper/bridge-watcher.ts"
+    "keeper:bridge": "tsx keeper/bridge-watcher.ts",
+    "devnet:multi": "tsx scripts/devnet-multi.ts"
   },
   "files": [
     "dist",

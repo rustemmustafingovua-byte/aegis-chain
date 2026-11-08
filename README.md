@@ -29,6 +29,21 @@ python3 demo.py        # демо: нормальный юзер проходи�
 python3 -m pytest test_aegis.py -v   # тесты
 ```
 
+### v1.16 — Сеть: несколько узлов, догон, кворум и форки (сделано)
+- **Догон вместо бана**: блок впереди (`gap`) → `sync_request`, а не штраф −20;
+  `core-ts/sync.ts` (classifyBlock + SyncTracker с cooldown/backoff) используется
+  обоими транспортами — TCP lite и libp2p/gossipsub
+- **Мультиватор devnet**: `AEGIS_VALIDATOR_SEED`, общий генезис
+  (`AEGIS_GENESIS_VALIDATORS`), `AEGIS_BOOTSTRAP`, слоты по часам;
+  `npm run devnet:multi` поднимает 3 узла и проверяет конвергенцию
+- **Кворум**: без живого ≥2/3 стейка узел не предлагает блок — изолированный
+  валидатор больше не создаёт несовместимую ветку
+- **Checkpoint-кворум**: узлы ко-подписывают checkpoint друг друга
+  (`aeg_checkpointOffer`, подпись только для своего tip) → light client видит 2/3
+- **Форки наблюдаются, а не банятся** (`forksSeen`); `aeg_syncStatus` + метрики
+- Проверено на живом devnet: 3 узла, одинаковые head/stateRoot, 3 разных
+  пропозера, `forksSeen=0`, checkpoint 6667 bps
+
 ### v1.15 — Кошелёк проверяет баланс сам: checkpoint + PQ в браузере (сделано)
 - **Trustless balance**: кнопка «✓ проверить без доверия» в кошельке прогоняет
   `aeg_validatorSet → aeg_checkpointLatest → aeg_getHeaders(cp.height+1…) → aeg_getProof`
@@ -66,11 +81,12 @@ python3 -m pytest test_aegis.py -v   # тесты
 ```bash
 cd ~/workspace/workspace/aegis-chain
 npm install
-npm test               # 79 passing (ядро) + 8 в wallet-mobile + 31 forge: hybrid, Chain, Shamir, Mesh, P2P, RPC, AMM, Governance, Bridge, security, fee market, Merkle proofs, WebAuthn/Passkey, signed checkpoints, header sync, nullifier proofs, WAL replay, light-client
+npm test               # 88 passing (ядро) + 8 в wallet-mobile + 31 forge: hybrid, Chain, Shamir, Mesh, P2P, RPC, AMM, Governance, Bridge, security, fee market, Merkle proofs, WebAuthn/Passkey, signed checkpoints, header sync, nullifier proofs, WAL replay, light-client
 npm run demo           # Ed25519+ML-DSA-65, intent, offline mesh, PoS block
 npm run build          # tsc → dist/
 npm run serve          # :8899 RPC+Explorer, :3899 TCP + :4899 libp2p Noise (живой узел, WAL + checkpoints)
 npm run keeper         # автономный конвертер USDC→AEGIS
+npm run devnet:multi   # 3 узла :8901-:8903 (свой ключ, общий генезис, синк)
 npx tsx cli/aegis.ts send --to=aeg1... --amount=1000 --intent="оплата"
 ```
 
@@ -101,7 +117,7 @@ npm run build          # ~334KB gzip ~109KB — PWA manifest + icon
 # iPhone/Android: создай Passkey (Touch/Face ID), кошелёк шифруется им
 ```
 
-## Полная инфраструктура (v1.15)
+## Полная инфраструктура (v1.16)
 
 | Компонент | Где | Запуск |
 |---|---|---|
@@ -110,6 +126,8 @@ npm run build          # ~334KB gzip ~109KB — PWA manifest + icon
 | **Anti-AI Shield** Intent, Liveness, Behavioral | `core-ts/aegis.ts` | — |
 | **Mesh автономия** DTN epidemic, QR/BLE/LoRa | `core-ts/mesh.ts`, `autonomy.ts`, `docs/MESH.md` | `npm run mesh:demo` |
 | **P2P сеть** TCP gossip (blocks/txs/sync) | `core-ts/p2p.ts` | `aegis serve` |
+| **Sync/кворум** догон без банов, backoff, ≥2/3 стейка для пропозинга | `core-ts/sync.ts`, `docs/NETWORK.md` | `aeg_syncStatus` |
+| **Мультиватор devnet** свой ключ + общий генезис + bootstrap | `core-ts/genesis.ts`, `scripts/devnet-multi.ts` | `npm run devnet:multi` |
 | **RPC** JSON-RPC 2.0 + REST + faucet/metrics | `core-ts/rpc.ts`, `GET /api/state`, `/metrics` | `POST /api/rpc` |
 | **Explorer** живой, отдаётся узлом (KPI, sparkline, hybrid-verify, gov/bridge, light-client proof) | `explorer/index.html`, `docs/DESIGN.md` | `GET /` |
 | **Fee market** EIP-1559-lite base fee + `aeg_gasPrice` | `core-ts/fee.ts`, `docs/FEE.md` | авто |
@@ -127,7 +145,7 @@ npm run build          # ~334KB gzip ~109KB — PWA manifest + icon
 | **Mobile Wallet** Passkey, Shamir 3-of-5, trustless balance, QR, history, shield | `wallet-mobile/` | `npm run dev` |
 | **CI/CD** GH Actions (slither, wallet), Docker hardened, keepalive | `.github/workflows/ci.yml`, `scripts/`, `Dockerfile` | — |
 
-Документация: `docs/FEE.md`, `docs/LIGHT_CLIENT.md`, `docs/WAL.md`, `docs/PASSKEY.md`, `docs/PROD.md`, `docs/DESIGN.md`, `docs/SDK.md`, `docs/TUTORIAL.md`, `docs/TOKENOMICS.md`, `docs/ROADMAP.md`, `docs/API.md`, `docs/OPS.md`, `docs/THREAT_MODEL.md`, `docs/INFRA.md`, `docs/MESH.md`, `docs/MOBILE.md`, `ARCHITECTURE.md`
+Документация: `docs/FEE.md`, `docs/LIGHT_CLIENT.md`, `docs/WAL.md`, `docs/PASSKEY.md`, `docs/PROD.md`, `docs/DESIGN.md`, `docs/SDK.md`, `docs/TUTORIAL.md`, `docs/NETWORK.md`, `docs/TOKENOMICS.md`, `docs/ROADMAP.md`, `docs/API.md`, `docs/OPS.md`, `docs/THREAT_MODEL.md`, `docs/INFRA.md`, `docs/MESH.md`, `docs/MOBILE.md`, `ARCHITECTURE.md`
 
 ## Токеномика (черновик)
 

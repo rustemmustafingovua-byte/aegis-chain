@@ -21,7 +21,7 @@ import { hybridVerify, type HybridKeypair } from "./hybrid.js";
 import { VERSION } from "./version.js";
 import { WAL_SNAPSHOT_EVERY } from "./wal.js";
 import { headerFromBlock, validatorViewOf, verifyHeaderChain } from "./headers.js";
-import { CheckpointStore, createCheckpoint, verifyCheckpoint } from "./checkpoints.js";
+import { CheckpointStore, createCheckpoint, coSign, verifyCheckpoint, type Checkpoint } from "./checkpoints.js";
 import { verifyNullifierProof, type NullifierProof } from "./nullifiers.js";
 
 type RpcRequest = { jsonrpc: string; id: number | string; method: string; params: any[] };
@@ -248,6 +248,12 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
       }
       case "aeg_validatorList": return [...chain.validators.entries()].map(([pk, v]) => ({ edPublic: pk, stake: v.stake.toString(), address: v.address ?? null }));
       case "aeg_peerList": return deps.p2p ? deps.p2p.peerList() : [];
+      // v1.16: sync/fork observability — is the node actually catching up?
+      case "aeg_syncStatus": {
+        const tcp = deps.p2p?.syncStatus ? deps.p2p.syncStatus() : null;
+        const lib = (deps as any).libp2p?.syncStatus ? (deps as any).libp2p.syncStatus() : null;
+        return { height: chain.height, head: chain.head?.hash ?? null, tcp, libp2p: lib };
+      }
       case "aeg_libp2pPeers": return (deps as any).libp2p ? (deps as any).libp2p.peerList() : [];
       case "aeg_meshStatus": return mesh ? { mempool: mesh.mempool.size, peers: [...mesh.peers], stats: mesh.stats, snapshot: mesh.snapshot } : { mesh: "not attached" };
       case "aeg_faucet": {
@@ -375,6 +381,21 @@ export function createRpcServer(chain: Chain, mesh?: MeshNode, deps: RpcDeps = {
           anchor: cp ? { height: cp.height, nullifierRoot: cp.nullifierRoot } : null,
           reason: check.ok ? undefined : (check as any).reason,
         };
+      }
+      // v1.16: co-sign a peer's checkpoint — only for OUR tip, only the state we see.
+      // Refusing a stale offer is the point: a signature must attest to verified state.
+      case "aeg_checkpointOffer": {
+        if (!deps.checkpoints || !deps.validator) throw new Error("checkpoint signing not configured");
+        const offered = params[0] as Checkpoint;
+        if (!offered || (offered as any).version !== 2) throw new Error("bad checkpoint");
+        if (offered.height !== chain.height) return { signed: false, reason: `not at tip (offer ${offered.height}, local ${chain.height})` };
+        if (offered.blockHash !== (chain.head?.hash ?? "")) return { signed: false, reason: "block hash mismatch" };
+        if (offered.stateRoot !== chain.ledger.stateRoot()) return { signed: false, reason: "state root mismatch" };
+        if (offered.nullifierRoot !== chain.ledger.nullifierRoot()) return { signed: false, reason: "nullifier root mismatch" };
+        const signed = coSign(JSON.parse(JSON.stringify(offered)) as Checkpoint, deps.validator);
+        deps.checkpoints.add(signed);
+        try { deps.saveCheckpoints?.(); } catch { /* best effort */ }
+        return { signed: true, checkpoint: signed, verification: verifyCheckpoint(signed, validatorViewOf(chain)) };
       }
       case "aeg_checkpointSign": {
         if (!deps.checkpoints || !deps.validator) throw new Error("checkpoint signing not configured");

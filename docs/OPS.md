@@ -77,6 +77,23 @@ RPC для баланса: `localStorage.setItem('aegis.rpc','http://127.0.0.1:8
 | «bad hybrid sig» от узла | подпись собрана не той каноничной строкой — см. `test/compat.test.ts` |
 | «баланс не подтверждён» | `proof.root ≠ cp.stateRoot`; дождись следующего checkpoint или проверь headers |
 
+## Мультиватор devnet (v1.16)
+
+```bash
+npm run devnet:multi                                   # :8901-:8903, Ctrl+C убивает все
+CHECK_HEIGHT=6 npx tsx scripts/devnet-multi.ts --check # поднять, проверить, выйти
+```
+
+Свой ключ на узел: `AEGIS_VALIDATOR_SEED`; общий генезис: `AEGIS_GENESIS_VALIDATORS`;
+подключение: `AEGIS_BOOTSTRAP=host:port`; ко-подписи: `AEGIS_CHECKPOINT_PEERS=url,url`.
+Подробности и границы — `docs/NETWORK.md`.
+
+| Симптом | Причина / действие |
+|---|---|
+| `proposal skipped: no quorum` | узел видит <2/3 стейка (нет пиров) — это защита, а не сбой |
+| `forksSeen` растёт | два узла с одинаковым ключом или один остался без пиров — сверь `AEGIS_VALIDATOR_SEED`/генезис |
+| узлы разъехались и не сходятся | нет реорганизации: перезапусти отставший узел с тем же `AEGIS_STATE_FILE` (догонит) или пересоздай devnet |
+
 ## Keeper / Bridge
 
 ```bash

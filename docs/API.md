@@ -1,4 +1,4 @@
-# AEGIS API — RPC и REST (v1.15)
+# AEGIS API — RPC и REST (v1.16)
 
 База: `POST /api/rpc` (JSON-RPC 2.0), `GET /api/state`, `GET /health`, `/` — explorer static.
 
@@ -46,6 +46,8 @@ curl http://127.0.0.1:8899/api/rpc -X POST -H 'Content-Type: application/json' \
 | `aeg_checkpointSign` | `[]` | admin: подписать свой checkpoint, персистится (v1.13) |
 | `aeg_getNullifierRoot` | `[]` | `{ height, nullifierRoot }` (v1.14) |
 | `aeg_isNullifierSpent` | `[nullifier]` | `{ spent, proof, verified, anchor }` — inclusion/non-inclusion (v1.14) |
+| `aeg_syncStatus` | `[]` | `{ height, head, tcp, libp2p }` — пиры, backoff, `forksSeen` (v1.16) |
+| `aeg_checkpointOffer` | `[checkpoint]` | `{ signed, checkpoint, verification }` — ко-подпись только для своего tip (v1.16) |
 
 Tx формат (см. `core-ts/ledger.ts` Tx): `from, to?, amount (bigint→string в JSON), fee, nonce, intent (обязательно), domain (обязательно), timestamp, sig{edSig,mlSig,hybrid}, mlPublicKeyB64, edPublicB64? (обязателен при первой трате — TOFU binding), nullifier?, data?` (`stake:|unstake:|unlock:|swap:|addliq:`).
 

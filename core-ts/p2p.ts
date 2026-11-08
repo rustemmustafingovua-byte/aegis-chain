@@ -12,6 +12,7 @@ import * as net from "node:net";
 import { Chain, type Block } from "./chain.js";
 import { parseTx, stringify, type Tx } from "./ledger.js";
 import { sha256, verify, sign } from "./crypto.js";
+import { SyncTracker, applyIncomingBlock, blockRef, classifyBlock } from "./sync.js";
 
 export type P2pMessage =
   | { type: "hello"; nodeId: string; height: number; edPublic?: string; sig?: string; ts?: number }
@@ -23,7 +24,7 @@ export type P2pMessage =
   | { type: "ping" }
   | { type: "pong"; height: number };
 
-export type PeerState = { socket: net.Socket; nodeId?: string; edPublic?: string; score: number; banned: boolean; rateCount: number; rateWindow: number; lastSeen: number };
+export type PeerState = { socket: net.Socket; nodeId?: string; edPublic?: string; score: number; banned: boolean; rateCount: number; rateWindow: number; lastSeen: number; height?: number };
 
 const MAX_MSG_BYTES = 256 * 1024; // blocks with ML-DSA sigs are ~5-10KB each, sync_response can be larger
 const RATE_LIMIT_PER_SEC = 50;
@@ -37,6 +38,13 @@ export class P2pNode {
   port: number;
   /** Optional signing key for authenticated HELLO (node operator keypair) */
   signKey?: { edPrivate: string; edPublic: string };
+  /** v1.16: per-peer sync bookkeeping (cooldown/backoff, no false bans) */
+  tracker = new SyncTracker();
+  /** v1.16: blocks seen that conflict with local history — observed, not punished */
+  forksSeen = 0;
+  /** v1.16: bootstrap peers are re-dialled; a single lost socket must not isolate a node */
+  bootstrap: { host: string; port: number }[] = [];
+  private reconnectTimer?: NodeJS.Timeout;
   constructor(chain: Chain, nodeId = `aegis-${Math.random().toString(36).slice(2, 8)}`, port = 3899, signKey?: { edPrivate: string; edPublic: string }) {
     this.chain = chain;
     this.nodeId = nodeId;
@@ -52,6 +60,25 @@ export class P2pNode {
         resolve();
       });
     });
+  }
+  /**
+   * v1.16: remember a bootstrap peer and keep the link up.
+   * The first dial often races the peer's listen() (ECONNREFUSED was swallowed and
+   * the node silently stayed isolated) — now we retry every few seconds.
+   */
+  addBootstrap(host: string, port: number) {
+    this.bootstrap.push({ host, port });
+    this.connect(host, port);
+    if (!this.reconnectTimer) {
+      this.reconnectTimer = setInterval(() => this.reconnectBootstrap(), 5000);
+      this.reconnectTimer.unref?.();
+    }
+  }
+  private reconnectBootstrap() {
+    for (const { host, port } of this.bootstrap) {
+      const alive = [...this.peers.values()].some((st) => st.socket.remotePort === port && !st.banned && st.socket.readyState === "open");
+      if (!alive) this.connect(host, port);
+    }
   }
   connect(host: string, port: number) {
     const s = net.createConnection({ host, port });
@@ -104,6 +131,27 @@ export class P2pNode {
       this.peers.delete(s);
     }
   }
+  /** v1.16: ask a peer to send us everything after `fromHeight`. */
+  requestSync(s: net.Socket, fromHeight: number) {
+    const st = this.peers.get(s);
+    if (!st) return;
+    const peerId = st.nodeId ?? String(s.remoteAddress ?? "peer");
+    this.tracker.noteRequest(peerId, fromHeight);
+    this.send(s, { type: "sync_request", fromHeight });
+  }
+  /** Peer identity used by the sync tracker (stable across socket reconnects). */
+  private peerIdOf(st: PeerState): string {
+    return st.nodeId ?? String(st.socket.remoteAddress ?? "peer");
+  }
+  syncStatus() {
+    return {
+      transport: "tcp",
+      height: this.chain.height,
+      peers: this.peerList(),
+      forksSeen: this.forksSeen,
+      sync: this.tracker.status(),
+    };
+  }
   private onData(s: net.Socket, data: Buffer) {
     const st = this.peers.get(s);
     if (!st || st.banned) return;
@@ -141,10 +189,16 @@ export class P2pNode {
             }
             st.score += 10; // authenticated bonus
           }
+          st.height = typeof h.height === "number" ? h.height : st.height;
           // respond with our hello + sync if peer is behind
           if (h.height < this.chain.height) {
             const blocks = this.chain.blocks.filter((b) => b.header.height > h.height);
             if (blocks.length) this.send(s, { type: "sync_response", blocks });
+          } else if (h.height > this.chain.height) {
+            // v1.16: peer is ahead — pull instead of waiting for its next block
+            const peerId = this.peerIdOf(st);
+            this.tracker.noteHeight(peerId, h.height);
+            if (this.tracker.shouldRequest(peerId, this.chain.height)) this.requestSync(s, this.chain.height);
           }
           this.send(s, { type: "pong", height: this.chain.height });
         } else if (msg.type === "ping") {
@@ -153,16 +207,24 @@ export class P2pNode {
           const block = (msg as any).block as Block;
           // normalize tx bigint fields
           if (block?.txs) block.txs = block.txs.map((t: any) => parseTx(t));
-          try {
-            const before = this.chain.height;
-            this.chain.accept(block);
+          st.height = Math.max(st.height ?? 0, block?.header?.height ?? 0);
+          const res = applyIncomingBlock({
+            chain: this.chain, block, peerId: this.peerIdOf(st), tracker: this.tracker,
+            requestSync: (fromHeight) => this.requestSync(s, fromHeight),
+          });
+          if (res.action === "applied") {
             st.score += 5;
+            this.tracker.noteForwarded(this.peerIdOf(st));
             console.log(`[p2p] new_block height=${block.header.height} from ${st.nodeId ?? "?"}`);
-            // relay to other peers (gossip)
-            this.broadcast(msg, s);
-          } catch (e: any) {
-            console.warn(`[p2p] block rejected from ${st.nodeId ?? "?"}: ${e.message}`);
-            this.penalize(s, -20, `invalid block: ${e.message}`);
+            this.broadcast(msg, s); // relay only blocks we actually accepted
+          } else if (res.action === "reject") {
+            console.warn(`[p2p] block rejected from ${st.nodeId ?? "?"}: ${res.reason}`);
+            this.penalize(s, -20, `invalid block: ${res.reason}`);
+          } else if (res.action === "sync") {
+            console.log(`[p2p] gap at ${block.header.height} (head ${this.chain.height}) — syncing from ${st.nodeId ?? "?"}`);
+          } else if ((res as any).cls === "fork") {
+            this.forksSeen++;
+            console.warn(`[p2p] fork block h=${block.header.height} from ${st.nodeId ?? "?"} — observed, not banned`);
           }
         } else if (msg.type === "new_tx") {
           try {
@@ -183,11 +245,36 @@ export class P2pNode {
         } else if (msg.type === "sync_response") {
           const blocks = (msg as any).blocks as Block[];
           if (!Array.isArray(blocks) || blocks.length > 100) { this.penalize(s, -10, "sync_response too large"); continue; }
+          const peerId = this.peerIdOf(st);
+          let appliedCount = 0;
+          let failed: string | undefined;
           for (const b of blocks) {
             if (b.txs) b.txs = b.txs.map((t: any) => parseTx(t));
-            try { this.chain.accept(b); } catch (e: any) { this.penalize(s, -5, `sync block invalid: ${e.message}`); break; }
+            const opt = classifyBlock(this.chain, blockRef(b));
+            if (opt === "duplicate") continue;
+            if (opt !== "next") { failed = `sync block out of order at ${b.header.height}`; break; }
+            try { this.chain.accept(b); appliedCount++; } catch (e: any) { failed = e.message; break; }
           }
-          st.score += 5;
+          if (failed) {
+            this.tracker.noteFailure(peerId, failed);
+            this.penalize(s, -5, `sync block invalid: ${failed}`);
+          } else {
+            this.tracker.noteSuccess(peerId);
+            st.score += 5;
+            if (appliedCount) console.log(`[p2p] synced ${appliedCount} blocks from ${st.nodeId ?? "?"} — height ${this.chain.height}`);
+            // peer still ahead? ask for the next range once the cooldown allows
+            if ((st.height ?? 0) > this.chain.height && this.tracker.shouldRequest(peerId, this.chain.height)) {
+              this.requestSync(s, this.chain.height);
+            }
+          }
+        } else if (msg.type === "pong") {
+          const h = (msg as any).height as number;
+          if (typeof h === "number") {
+            st.height = Math.max(st.height ?? 0, h);
+            const peerId = this.peerIdOf(st);
+            this.tracker.noteHeight(peerId, h);
+            if (h > this.chain.height && this.tracker.shouldRequest(peerId, this.chain.height)) this.requestSync(s, this.chain.height);
+          }
         } else if (msg.type === "mesh_packet") {
           // forward to mesh if attached (no-op here, server wires MeshNode separately)
           st.score += 1;
@@ -202,9 +289,14 @@ export class P2pNode {
   gossipBlock(b: Block) { this.broadcast({ type: "new_block", block: b }); }
   gossipTx(tx: Tx) { this.broadcast({ type: "new_tx", tx }); }
   peerList() {
-    return [...this.peers.values()].map((st) => ({ nodeId: st.nodeId, score: st.score, banned: st.banned, lastSeen: st.lastSeen, remote: st.socket.remoteAddress }));
+    return [...this.peers.values()].map((st) => ({ nodeId: st.nodeId, edPublic: st.edPublic, score: st.score, banned: st.banned, lastSeen: st.lastSeen, height: st.height, remote: st.socket.remoteAddress }));
   }
-  close() { for (const [p] of this.peers) p.destroy(); this.peers.clear(); this.server.close(); }
+  close() {
+    if (this.reconnectTimer) clearInterval(this.reconnectTimer);
+    for (const [p] of this.peers) p.destroy();
+    this.peers.clear();
+    this.server.close();
+  }
 }
 
 /** Помощник для тестов: in-memory шина (без TCP). */
